@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "miniz.h": "c",
+        "nbt.h": "c"
+    }
+}
