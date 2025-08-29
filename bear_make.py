@@ -110,7 +110,6 @@ parser.add_argument('file', nargs='?', help='path to your make file')
 parser.add_argument('-eg', '--example', required=False, action='store_true', help='add this flag to output an example make file')
 parser.add_argument('-no', '--no_optimization', required=False, action='store_true', help='instead of keeping object files to speed up builds')
 parser.add_argument('-r', '--release', required=False, action='store_true', help='runs in release mode. otherwise optimization is off and the executable is built for debugging')
-parser.add_argument('-lf', '--library_flags', nargs='+', required=False, help='for including other flags in the gcc command. Like including "-lm" for the "<math.h>". Add with qutoes in the command like "-lm"')
 args = parser.parse_args()
 
 if args.example:

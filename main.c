@@ -25,6 +25,56 @@ size_t nbt_read_mem(void *userdata, uint8_t *buf, size_t size) {
 #define SECTION_SIZE 16
 #define BLOCKS_PER_SECTION (SECTION_SIZE*SECTION_SIZE*SECTION_SIZE)
 
+
+
+// DUMPERS
+void dump_compound(nbt_tag_t *compound, int indent) {
+    if (!compound || compound->type != NBT_TYPE_COMPOUND) return;
+
+    for (size_t i = 0; i < compound->tag_compound.size; i++) {
+        nbt_tag_t *child = compound->tag_compound.value[i];
+        if (!child) continue;
+
+        for (int j = 0; j < indent; j++) printf("  ");
+        printf("%s (type %d)\n", 
+               child->name ? child->name : "(no name)", 
+               child->type);
+
+        if (child->type == NBT_TYPE_COMPOUND) {
+            dump_compound(child, indent + 1);
+        }
+        else if (child->type == NBT_TYPE_LIST) {
+            printf("  (list of %zu items, subtype=%d)\n", 
+                child->tag_list.size, child->tag_list.type);
+
+            for (size_t k = 0; k < child->tag_list.size; k++) {
+                nbt_tag_t *elem = child->tag_list.value[k];
+                if (!elem) continue;
+
+                for (int j = 0; j < indent + 1; j++) printf("  ");
+                printf("[%zu] type=%d", k, elem->type);
+
+                if (elem->type == NBT_TYPE_STRING) {
+                    printf(" value=\"%.*s\"", (int)elem->tag_string.size, elem->tag_string.value);
+                }
+                else if (elem->type == NBT_TYPE_INT) {
+                    printf(" value=%d", elem->tag_int.value);
+                }
+                else if (elem->type == NBT_TYPE_COMPOUND) {
+                    printf(" (compound)\n");
+                    dump_compound(elem, indent + 2);
+                    continue;
+                }
+                // add other types if you want (BYTE, SHORT, LONG, etc.)
+
+                printf("\n");
+            }
+        }
+    }
+}
+
+
+
 // Helper to read a bitfield from the packed long array
 static inline uint64_t get_bits(uint64_t *data, size_t bit_index, size_t bits_per_block, size_t data_len) {
     size_t start_long = bit_index / 64;
@@ -38,6 +88,19 @@ static inline uint64_t get_bits(uint64_t *data, size_t bit_index, size_t bits_pe
 
     uint64_t mask = (1ULL << bits_per_block) - 1;
     return val & mask;
+}
+
+void make_dirs(const char *path) {
+    char tmp[1024];
+    snprintf(tmp, sizeof(tmp), "%s", path);
+
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/' || *p == '\\') {
+            *p = '\0';
+            mkdir(tmp, 0755); // ignore if exists
+            *p = '/';
+        }
+    }
 }
 
 // Decode BlockStates long array into 16x16x16 palette indices
@@ -57,6 +120,8 @@ void decode_block_states(int64_t *data, size_t data_len, size_t palette_size, ui
         out[x][y][z] = (uint8_t)idx;
     }
 }
+
+
 
 
 // Print a 16x16x16 section using the palette names
@@ -122,6 +187,16 @@ void print_section_to_file(uint8_t blocks[16][16][16], nbt_tag_t *palette, const
                 nbt_tag_t *block_tag = nbt_tag_list_get(palette, idx);
                 nbt_tag_t *name_tag = block_tag ? nbt_tag_compound_get(block_tag, "Name") : NULL;
                 const char *name = name_tag ? name_tag->tag_string.value : "unknown";
+
+                nbt_tag_t *props = nbt_tag_compound_get(block_tag, "Properties");
+                if (props && props->type == NBT_TYPE_COMPOUND) {
+                    for (size_t i = 0; i < props->tag_compound.size; i++) {
+                        nbt_tag_t *p = props->tag_compound.value[i];
+                        if (p->type == NBT_TYPE_STRING) {
+                            fprintf(fp, "[%s=%s]", p->name, p->tag_string.value);
+                        }
+                    }
+                }
 
                 fprintf(fp, "%-24.24s ", name);
             }
@@ -226,9 +301,16 @@ void print_region_to_file(const char *region_file_path, const char *file_name) {
 
     for (size_t i = 0; i < sections->tag_list.size; ++i) {
         nbt_tag_t *section = nbt_tag_list_get(sections, i);
+
+
+        nbt_tag_t *biomes = nbt_tag_compound_get(section, "biomes");
+        nbt_tag_t *biomes_palette = nbt_tag_compound_get(biomes, "palette");
+
+
         nbt_tag_t *bs = nbt_tag_compound_get(section, "block_states");
         nbt_tag_t *palette = nbt_tag_compound_get(bs, "palette");
         nbt_tag_t *data = nbt_tag_compound_get(bs, "data");
+
 
         int y = nbt_tag_compound_get(section, "Y")->tag_byte.value;
 
@@ -277,12 +359,265 @@ void print_region_to_file(const char *region_file_path, const char *file_name) {
 
 }
 
+void rip_textures_from_minecraft_jar(const char *jar_path, const char *out_dir) {
+
+
+    if (mkdir(out_dir, 0755) != 0) {
+        perror("mkdir failed");
+    }
+
+
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+
+    if (!mz_zip_reader_init_file(&zip, jar_path, 0)) {
+        printf("Failed to open jar: %s\n", jar_path);
+        return 1;
+    }
+
+    int file_count = (int)mz_zip_reader_get_num_files(&zip);
+    printf("Archive has %d files\n", file_count);
+
+    for (int i = 0; i < file_count; i++) {
+        mz_zip_archive_file_stat stat;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat)) {
+            printf("Failed to get file stat for index %d\n", i);
+            continue;
+        }
+
+        const char *name = stat.m_filename;
+
+        // Only extract block textures
+        if (strstr(name, "assets/minecraft/textures/block/") &&
+            strstr(name, ".png")) {
+
+            // printf("Extracting %s...\n", name);
+
+            // Build output path
+            char out_path[1024];
+            snprintf(out_path, sizeof(out_path), "%s/%s", out_dir, name);
+
+            make_dirs(out_path);
+
+            if (!mz_zip_reader_extract_to_file(&zip, i, out_path, 0)) {
+                printf("Failed to extract %s\n", name);
+            }
+        }
+    }
+
+    mz_zip_reader_end(&zip);
+}
+
+void rip_block_states_from_minecraft_jar(const char *jar_path, const char *out_dir) {
+
+
+    if (mkdir(out_dir, 0755) != 0) {
+        perror("mkdir failed");
+    }
+
+
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+
+    if (!mz_zip_reader_init_file(&zip, jar_path, 0)) {
+        printf("Failed to open jar: %s\n", jar_path);
+        return 1;
+    }
+
+    int file_count = (int)mz_zip_reader_get_num_files(&zip);
+    printf("Archive has %d files\n", file_count);
+
+    for (int i = 0; i < file_count; i++) {
+        mz_zip_archive_file_stat stat;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat)) {
+            printf("Failed to get file stat for index %d\n", i);
+            continue;
+        }
+
+        const char *name = stat.m_filename;
+
+        // Only extract block textures
+        if (strstr(name, "assets/minecraft/blockstates/") &&
+            strstr(name, ".json")) {
+
+            // printf("Extracting %s...\n", name);
+
+            // Build output path
+            char out_path[1024];
+            snprintf(out_path, sizeof(out_path), "%s/%s", out_dir, name);
+
+            make_dirs(out_path);
+
+            if (!mz_zip_reader_extract_to_file(&zip, i, out_path, 0)) {
+                printf("Failed to extract %s\n", name);
+            }
+        }
+    }
+
+    mz_zip_reader_end(&zip);
+}
+
+void rip_json_files_from_minecraft_jar(const char *jar_path, const char *json_files_jar_folder, const char *out_dir) {
+
+
+    if (mkdir(out_dir, 0755) != 0) {
+        perror("mkdir failed");
+    }
+
+
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+
+    if (!mz_zip_reader_init_file(&zip, jar_path, 0)) {
+        printf("Failed to open jar: %s\n", jar_path);
+        return 1;
+    }
+
+    int file_count = (int)mz_zip_reader_get_num_files(&zip);
+    printf("Archive has %d files\n", file_count);
+
+    for (int i = 0; i < file_count; i++) {
+        mz_zip_archive_file_stat stat;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat)) {
+            printf("Failed to get file stat for index %d\n", i);
+            continue;
+        }
+
+        const char *name = stat.m_filename;
+
+        // Only extract block textures
+        if (strstr(name, json_files_jar_folder) &&
+            strstr(name, ".json")) {
+
+            // printf("Extracting %s...\n", name);
+
+            // Build output path
+            char out_path[1024];
+            snprintf(out_path, sizeof(out_path), "%s/%s", out_dir, name);
+
+            make_dirs(out_path);
+
+            if (!mz_zip_reader_extract_to_file(&zip, i, out_path, 0)) {
+                printf("Failed to extract %s\n", name);
+            }
+        }
+    }
+
+    mz_zip_reader_end(&zip);
+}
+
+
+
+
+
+
+
+
+// MAIN METHODS
+
+
+
+// STRUCTS
+
+typedef struct {
+    char* key;
+    char* value;
+} Property;
+
+void free_property(Property* property) {
+    free(property->key);
+    free(property->value);
+}
+
+typedef struct {
+    char* name;                   // Full block name, e.g., "minecraft:grass_block"
+    int tint_index;               // -1 if none
+    size_t num_properties;
+    Property* properties;         // Array of properties like "facing=north", "half=top"
+    char* model;                  // Optional reference to a block model JSON
+    char* biome;                  // Optional biome name for color calculations
+} Block;
+
+void free_block(Block* block) {
+    free(block->name);
+    free(block->model);
+    free(block->biome);
+    for(size_t i = 0; i < block->num_properties; ++i) {
+        free_property(&block->properties[i]);
+    }
+}
+
+
+
+// UTILITY METHODS
+
+void extract_jar(const char *jar_path, const char *out_dir) {
+    
+    if (mkdir(out_dir, 0755) != 0) {
+        perror("mkdir failed");
+    }
+
+
+    mz_zip_archive zip;
+    memset(&zip, 0, sizeof(zip));
+
+    if (!mz_zip_reader_init_file(&zip, jar_path, 0)) {
+        printf("Failed to open jar: %s\n", jar_path);
+        return 1;
+    }
+
+    int file_count = (int)mz_zip_reader_get_num_files(&zip);
+    printf("Archive has %d files\n", file_count);
+
+    for (int i = 0; i < file_count; i++) {
+        mz_zip_archive_file_stat stat;
+        if (!mz_zip_reader_file_stat(&zip, i, &stat)) {
+            printf("Failed to get file stat for index %d\n", i);
+            continue;
+        }
+
+        const char *name = stat.m_filename;
+
+        // Only extract block textures
+        if (strstr(name, ".json")) {
+
+            // printf("Extracting %s...\n", name);
+
+            // Build output path
+            char out_path[1024];
+            snprintf(out_path, sizeof(out_path), "%s/%s", out_dir, name);
+
+            make_dirs(out_path);
+
+            if (!mz_zip_reader_extract_to_file(&zip, i, out_path, 0)) {
+                printf("Failed to extract %s\n", name);
+            }
+        }
+    }
+
+    mz_zip_reader_end(&zip);
+}
+
+
+
+
 
 int main() {
-    print_region_to_file("test/r.-1.-1.mca", "r.-1.-1.txt");
-    print_region_to_file("test/r.-1.0.mca", "r.-1.0.txt");
-    print_region_to_file("test/r.0.-1.mca", "r.0.-1.txt");
-    print_region_to_file("test/r.0.0.mca", "r.0.0.txt");
+    
+    // SORT MCA FILES TO RENDER CLOSER TO VIEWER FIRST
+
+
+    /*
+        RENDER MCAS
+    */
+
+    // DETERMINE ALL VISIBLE BLOCKS IN MCA
+
+    // RENDER EACH ONE, SKIPPING IF COVERED BY ANOTHER BLOCK
+
+    
+
+
 
     return 0;
 }
