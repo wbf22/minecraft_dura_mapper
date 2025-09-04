@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "miniz.h": "c",
-        "nbt.h": "c"
+        "nbt.h": "c",
+        "dirent.h": "c",
+        "typeinfo": "c"
     }
 }

@@ -19,7 +19,13 @@
             "request": "launch",
             "name": "Test C",
             "program": "${workspaceFolder}/minecraft_dura_mapper",
-            "args": [],
+            "args": [
+                "-a", 
+                "SW",
+                // "-h"
+                "-w",
+                "/home/brandon/.minecraft/saves/New World"
+            ],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "bear_make"
         }

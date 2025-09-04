@@ -3,8 +3,19 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <getopt.h>
 #define NBT_IMPLEMENTATION
 #include "dependencies/nbt.h"  // Make sure nbt.h is in your include path
+#include <sys/stat.h> // for stat
+#include <unistd.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dirent.h>
+#endif
+
+
 
 // Simple NBT reader callback for libnbt
 typedef struct {
@@ -25,6 +36,8 @@ size_t nbt_read_mem(void *userdata, uint8_t *buf, size_t size) {
 #define SECTION_SIZE 16
 #define BLOCKS_PER_SECTION (SECTION_SIZE*SECTION_SIZE*SECTION_SIZE)
 
+
+static char* ANGLE = "SW";
 
 
 // DUMPERS
@@ -510,6 +523,82 @@ void rip_json_files_from_minecraft_jar(const char *jar_path, const char *json_fi
 
 
 
+// ARG PARSER
+
+#define len(x) (sizeof(x) / sizeof((x)[0]))
+
+typedef enum { ARG_BOOL, ARG_INT, ARG_STRING } ArgType;
+typedef struct {
+    const char *long_name;   // e.g. "file"
+    char short_name;         // e.g. 'f'
+    ArgType type;            // ARG_BOOL / ARG_INT / ARG_STRING
+    const char *help;        // help text
+    void *value;             // where to store the parsed value
+} ArgOption;
+
+// Auto-help printer
+void print_help(const char *prog, ArgOption *options, int count) {
+    printf("Usage: %s [options]\n\nOptions:\n", prog);
+    for (int i = 0; i < count; i++) {
+        printf("  -%c, --%-10s %s\n",
+               options[i].short_name,
+               options[i].long_name,
+               options[i].help);
+    }
+}
+
+// Generic parse function
+void parse_args(int argc, char *argv[], ArgOption *options, int options_size) {
+    struct option long_opts[options_size + 2]; // +2 for help and terminator
+
+    for (int i = 0; i < options_size; i++) {
+        long_opts[i].name    = options[i].long_name;
+        long_opts[i].has_arg = (options[i].type == ARG_BOOL) ? no_argument : required_argument;
+        long_opts[i].flag    = 0;
+        long_opts[i].val     = options[i].short_name;
+    }
+    // Add built-in help
+    long_opts[options_size].name = "help";
+    long_opts[options_size].has_arg = no_argument;
+    long_opts[options_size].flag = 0;
+    long_opts[options_size].val = 'h';
+    long_opts[options_size+1].name = 0;
+
+    char short_opts[2*options_size + 3]; // e.g. "f:n:"
+    int pos = 0;
+    for (int i = 0; i < options_size; i++) {
+        short_opts[pos++] = options[i].short_name;
+        if (options[i].type != ARG_BOOL) {
+            short_opts[pos++] = ':';
+        }
+    }
+    short_opts[pos++] = 'h';
+    short_opts[pos] = '\0';
+
+    int opt;
+    while ((opt = getopt_long(argc, argv, short_opts, long_opts, NULL)) != -1) {
+        if (opt == 'h') {
+            print_help(argv[0], options, options_size);
+            exit(0);
+        }
+        for (int i = 0; i < options_size; i++) {
+            if (opt == options[i].short_name) {
+                switch (options[i].type) {
+                    case ARG_BOOL:
+                        *(int*)options[i].value = 1;
+                        break;
+                    case ARG_INT:
+                        *(int*)options[i].value = atoi(optarg);
+                        break;
+                    case ARG_STRING:
+                        *(char**)options[i].value = optarg;
+                        break;
+                }
+            }
+        }
+    }
+}
+
 
 
 
@@ -598,20 +687,250 @@ void extract_jar(const char *jar_path, const char *out_dir) {
     mz_zip_reader_end(&zip);
 }
 
+int is_regular_file(const char *dir, const char *name) {
+    char fullpath[1024];
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", dir, name);
+
+    struct stat st;
+    if (stat(fullpath, &st) != 0) return 0;
+    return S_ISREG(st.st_mode);
+}
+
+char **collect_files(const char *path, int *out_count) {
+    char **files = NULL;
+    int count = 0;
+    int capacity = 10;
+
+    files = malloc(capacity * sizeof(char*));
+    if (!files) {
+        perror("malloc");
+        *out_count = 0;
+        return NULL;
+    }
+
+#ifdef _WIN32
+    // Use wide chars for Windows API
+    wchar_t wpath[MAX_PATH];
+    mbstowcs(wpath, path, MAX_PATH);
+
+    wchar_t search_path[MAX_PATH];
+    swprintf(search_path, MAX_PATH, L"%ls\\*", wpath);
+
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW(search_path, &findData);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        free(files);
+        *out_count = 0;
+        return NULL;
+    }
+
+    do {
+        // Skip "." and ".."
+        if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0)
+            continue;
+
+        // Only regular files
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) 
+            continue;
+
+        // Grow array if needed
+        if (count >= capacity) {
+            capacity *= 2;
+            char **tmp = realloc(files, capacity * sizeof(char*));
+            if (!tmp) break;
+            files = tmp;
+        }
+        
+        // Convert wchar_t filename to UTF-8
+        size_t len_name = wcstombs(NULL, findData.cFileName, 0);
+        if (len_name == (size_t)-1) continue; // conversion failed
+        char *filename = malloc(len_name + 1);
+        if (!filename) break;
+        wcstombs(filename, findData.cFileName, len_name + 1);
+
+        // Build full path: path + "\\" + filename
+        size_t len_path = strlen(path);
+        size_t len_full = len_path + 1 + len_name + 1; // path + '\' + filename + '\0'
+        char *fullpath = malloc(len_full);
+        if (!fullpath) {
+            free(filename);
+            break;
+        }
+        snprintf(fullpath, len_full, "%s\\%s", path, filename);
+
+        free(filename); // free intermediate name, we only keep fullpath
+
+        files[count++] = fullpath;
+
+    } while (FindNextFileW(hFind, &findData));
+
+    FindClose(hFind);
+
+#else
+    // POSIX implementation
+    DIR *dir = opendir(path);
+    if (!dir) {
+        perror("opendir");
+        free(files);
+        *out_count = 0;
+        return NULL;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.' &&
+           (entry->d_name[1] == '\0' ||
+           (entry->d_name[1] == '.' && entry->d_name[2] == '\0')))
+            continue;
+
+        if (!is_regular_file(path, entry->d_name)) continue;
+
+        if (count >= capacity) {
+            capacity *= 2;
+            char **tmp = realloc(files, capacity * sizeof(char*));
+            if (!tmp) break;
+            files = tmp;
+        }
 
 
+        char fullpath[1024];
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
+        files[count++] = strdup(fullpath);
+    }
 
+    closedir(dir);
+#endif
 
-int main() {
+    *out_count = count;
+    return files;
+}
+
+/**
+ * Combines the two strings. creating a new string. Neither input string is freed.
+ */
+char* cat(char* str, char* app) {
+    if (!str) str = "";  // treat NULL as empty string
+    if (!app) app = "";
     
-    // SORT MCA FILES TO RENDER CLOSER TO VIEWER FIRST
+    size_t len = strlen(str) + strlen(app) + 1;
+    char *result = malloc(len);
+    if (!result) return NULL;
 
+    strcpy(result, str);
+    strcat(result, app);
+
+    return result;
+}
+
+void substr(char* dest, char* src, int start_inclusive, int end_exclusive) {
+    strncpy(dest, src + start_inclusive, end_exclusive - start_inclusive);
+}
+
+
+void extract_mca_region_coordinates(const char* mca_path, int* x, int* z) {
+    int p_len = strlen(mca_path);
+
+    int i = p_len - 1;
+    int done = 0;
+    while(mca_path[i] != '.') i--;
+    int end_z = i;
+    while(mca_path[i] != '.') i--;
+    int start_z = i + 1;
+    int end_x = i;
+    while(mca_path[i] != '.') i--;
+    int start_x = i + 1;
+
+    char x_str[256];
+    substr(x_str, mca_path, start_x, end_x);
+
+    char z_str[256];
+    substr(z_str, mca_path, start_z, end_z);
+}
+
+
+int compare_mca_paths(const void *a, const void *b) {
+    char* first = (char*)a;
+    char* second = *(char*)b;
+
+    int first_x = 0;
+    int first_z = 0;
+    int second_x = 0;
+    int second_z = 0;
+
+
+
+
+    return (ia > ib) - (ia < ib); // returns -1, 0, or 1
+}
+
+
+int main(int argc, char **argv) {
+
+    // PARSE ARGS
+    char *jar_path = NULL;
+    char *out_dir = NULL;
+    char *angle = NULL;
+    char *path = NULL;
+
+    ArgOption options[] = {
+        {
+            "jar",    
+            'j', 
+            ARG_STRING, 
+            "Path Minecraft client jar for the version of your world. Can be found under '.minecraft/versions/1.21.8/1.21.8.jar'"
+            " or something similar. If nothing is provided then default assets will be used instead.", 
+            &jar_path
+        },
+        {
+            "out",    
+            'o', 
+            ARG_STRING, 
+            "Output directory of the mapper. By default outputs to a directory 'OUT' in the current directory", 
+            &out_dir
+        },
+        {
+            "angle",    
+            'a', 
+            ARG_STRING, 
+            "Viewing angle of the map. Options are 'NE', 'SE', 'SW', 'NW'.", 
+            &angle
+        },
+        {
+            "world",    
+            'w', 
+            ARG_STRING, 
+            "The path to your minecraft world save folder. Minecraft worlds are saved in '.minecraft/saves/' as of 1.21.8", 
+            &path
+        },
+        // XXX: maybe add something to specify mca file directory, and other key directories for future minecraft version changes
+
+        // {"verbose", 'v', ARG_BOOL,   "Enable verbose output", &verbose},
+        // {"count",   'n', ARG_INT,    "Number of iterations", &count},
+    };
+    parse_args(argc, argv, options, len(options));
+
+
+    // COLLECT MCA FILES
+    int n;
+    char* region_folder = cat(path, "/region");
+    char **files = collect_files(region_folder, &n);
+    
+
+    // SORT MCA FILES TO RENDER CLOSER TO VIEWER FIRST
+    qsort(files, n, sizeof(char*), compare_mca_paths);
+    
+    for (int i = 0; i < n; i++) {
+        printf("  %s\n", files[i]);
+        free(files[i]);
+    }
+    free(files);
+    free(region_folder);
 
     /*
         RENDER MCAS
     */
 
-    // DETERMINE ALL VISIBLE BLOCKS IN MCA
+    // DETERMINE ALL AIR EXPOSED BLOCKS IN MCA
 
     // RENDER EACH ONE, SKIPPING IF COVERED BY ANOTHER BLOCK
 
