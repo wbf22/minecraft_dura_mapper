@@ -16,8 +16,15 @@
 #endif
 
 
+#define SECTION_SIZE 16
+#define BLOCKS_PER_SECTION (SECTION_SIZE*SECTION_SIZE*SECTION_SIZE)
 
-// Simple NBT reader callback for libnbt
+
+static char* ANGLE = "SW";
+
+
+// DUMPERS
+
 typedef struct {
     uint8_t *data;
     size_t size;
@@ -32,15 +39,6 @@ size_t nbt_read_mem(void *userdata, uint8_t *buf, size_t size) {
     return size;
 }
 
-
-#define SECTION_SIZE 16
-#define BLOCKS_PER_SECTION (SECTION_SIZE*SECTION_SIZE*SECTION_SIZE)
-
-
-static char* ANGLE = "SW";
-
-
-// DUMPERS
 void dump_compound(nbt_tag_t *compound, int indent) {
     if (!compound || compound->type != NBT_TYPE_COMPOUND) return;
 
@@ -85,7 +83,6 @@ void dump_compound(nbt_tag_t *compound, int indent) {
         }
     }
 }
-
 
 
 // Helper to read a bitfield from the packed long array
@@ -133,9 +130,6 @@ void decode_block_states(int64_t *data, size_t data_len, size_t palette_size, ui
         out[x][y][z] = (uint8_t)idx;
     }
 }
-
-
-
 
 // Print a 16x16x16 section using the palette names
 void print_section_palette_names(uint8_t blocks[16][16][16], nbt_tag_t *palette) {
@@ -521,6 +515,93 @@ void rip_json_files_from_minecraft_jar(const char *jar_path, const char *json_fi
 
 
 
+// ARRAYS
+
+/**
+ * Adds the element to the last index in the array. If last_index is -1, then the array will be walked until
+ * the first NULL element. 
+ * 
+ * If the array is full, a new array is made with double the size. The current array will then be freed and replaced with the
+ * new array.
+ */
+void push(void** array, void* element, long array_length, long* last_index) {
+
+    // determine last_index if not provided
+    if (*last_index == -1) {
+        *last_index = 0;
+        while(array[*last_index] != NULL && last_index < array_length) {
+            *last_index++;
+        }
+    }
+
+    // double if full
+    if (last_index == array_length) {
+        void** new_array = calloc(array_length * 2, sizeof(element));
+        memcpy(new_array, array, sizeof(array));
+        free(array);
+        array = new_array;
+    }
+
+    // set last element
+    array[*last_index] = element;
+    *last_index++;
+}
+
+void free_array_of_pointers(void** array) {
+    if (array[0] != NULL) {
+
+    }
+}
+
+
+
+// STRINGS
+
+/**
+ * Add the second string onto the end of the buffer.
+ * 
+ * The buffer string may be doubled in length if an overflow will occur.
+ */
+void bcat(char* buffer, long* buffer_len, char* str2) {
+    size_t len = strlen(buffer) + strlen(str2) + 1;
+
+    if (len >= *buffer_len-1) {
+        char *result = malloc(len * 2 * sizeof(char));
+
+        if (result == NULL) {
+            perror("malloc failed");
+            return 1;
+        }
+
+        strcpy(result, buffer);   // copy str1 into result
+        strcat(result, str2);   // append str2
+
+        free(buffer);
+        buffer = result;
+    }
+    else {
+        strcat(buffer, str2);   // append str2
+    }
+}
+
+/**
+ * Combines the two strings. creating a new string. Neither input string is freed.
+ */
+char* cat(char* str, char* app) {
+    if (!str) str = "";  // treat NULL as empty string
+    if (!app) app = "";
+    
+    size_t len = strlen(str) + strlen(app) + 1;
+    char *result = malloc(len);
+    if (!result) return NULL;
+
+    strcpy(result, str);
+    strcat(result, app);
+
+    return result;
+}
+
+
 
 
 // ARG PARSER
@@ -805,62 +886,95 @@ char **collect_files(const char *path, int *out_count) {
     return files;
 }
 
-/**
- * Combines the two strings. creating a new string. Neither input string is freed.
- */
-char* cat(char* str, char* app) {
-    if (!str) str = "";  // treat NULL as empty string
-    if (!app) app = "";
-    
-    size_t len = strlen(str) + strlen(app) + 1;
-    char *result = malloc(len);
-    if (!result) return NULL;
-
-    strcpy(result, str);
-    strcat(result, app);
-
-    return result;
-}
-
 void substr(char* dest, char* src, int start_inclusive, int end_exclusive) {
-    strncpy(dest, src + start_inclusive, end_exclusive - start_inclusive);
+    int len = end_exclusive - start_inclusive;
+    strncpy(dest, src + start_inclusive, len);
+    dest[len] = '\0';
 }
 
-
-void extract_mca_region_coordinates(const char* mca_path, int* x, int* z) {
+void extract_mca_region_coordinates(const char* mca_path, long long* x, long long* z) {
     int p_len = strlen(mca_path);
 
     int i = p_len - 1;
     int done = 0;
     while(mca_path[i] != '.') i--;
     int end_z = i;
+    i--;
     while(mca_path[i] != '.') i--;
     int start_z = i + 1;
     int end_x = i;
+    i--;
     while(mca_path[i] != '.') i--;
     int start_x = i + 1;
 
     char x_str[256];
     substr(x_str, mca_path, start_x, end_x);
+    printf("%s\n", x_str);
+    *x = strtoll(x_str, NULL, 10);
 
     char z_str[256];
     substr(z_str, mca_path, start_z, end_z);
+    *z = strtoll(z_str, NULL, 10);
+
 }
 
+#define MAX(a,b) ((a) > (b) ? (a) : (b))
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 int compare_mca_paths(const void *a, const void *b) {
-    char* first = (char*)a;
-    char* second = *(char*)b;
+    const char* first = *(const char**)a;
+    const char* second = *(const char**)b;
 
-    int first_x = 0;
-    int first_z = 0;
-    int second_x = 0;
-    int second_z = 0;
+    long long first_x = 0;
+    long long first_z = 0;
+    long long second_x = 0;
+    long long second_z = 0;
 
+    extract_mca_region_coordinates(first, &first_x, &first_z);
+    extract_mca_region_coordinates(second, &second_x, &second_z);
 
+    
+    if (strcmp(ANGLE, "NE") == 0) { // + +
+        long long max_x = MAX(first_x, second_x);
+        long long max_z = MAX(first_z, second_z);
+        long long max_coor = MAX(max_x, max_z);
 
+        long long dist_first = llabs(max_coor - first_x) + llabs(max_coor - first_z);
+        long long dist_second = llabs(max_coor - second_x) + llabs(max_coor - second_z);
+        return dist_first - dist_second;
+    }
+    else if (strcmp(ANGLE, "SE") == 0) {  // + -
+        long long max_x = MAX(first_x, second_x);
+        long long min_z = MIN(first_z, second_z);
+        long long max_coor = MAX(llabs(max_x), llabs(min_z));
 
-    return (ia > ib) - (ia < ib); // returns -1, 0, or 1
+        long long dist_first = llabs(max_coor - first_x) + llabs(-max_coor - first_z);
+        long long dist_second = llabs(max_coor - second_x) + llabs(-max_coor - second_z);
+        return dist_first - dist_second;
+    }
+    else if (strcmp(ANGLE, "SW") == 0) {  // - -
+        long long min_x = MIN(first_x, second_x);
+        long long min_z = MIN(first_z, second_z);
+        long long min_coor = MIN(min_x, min_z);
+
+        long long dist_first = llabs(min_coor - first_x) + llabs(min_coor - first_z);
+        long long dist_second = llabs(min_coor - second_x) + llabs(min_coor - second_z);
+        return dist_first - dist_second;
+
+    }
+    else if (strcmp(ANGLE, "NW") == 0) {  // - +
+        long long min_x = MIN(first_x, second_x);
+        long long max_z = MAX(first_z, second_z);
+        long long max_coor = MAX(llabs(min_x), llabs(max_z));
+
+        long long dist_first = llabs(-max_coor - first_x) + llabs(max_coor - first_z);
+        long long dist_second = llabs(-max_coor - second_x) + llabs(max_coor - second_z);
+        return dist_first - dist_second;
+    }
+    else {
+        printf("'%s' isn't a valid angle.\n", ANGLE);
+        exit(-1);
+    }
 }
 
 

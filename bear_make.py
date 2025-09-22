@@ -218,14 +218,15 @@ else:
                     # recompile if dependencies have changes
                     if not recompile:
                         result = subprocess.run(['gcc', '-MM', file], capture_output=True, text=True)
-                        dependencies = result.stdout.split(' ')
-                        dependencies[-1] = dependencies[-1][:-1] # remove new line
+                        dependencies = result.stdout.replace('\\', '').replace('\n', '').replace('  ', ' ').split(' ')
                         if len(dependencies) > 2:
                             dependencies = dependencies[2:]
                             for dependency in dependencies:
-                                dep_hash = hash_file_blake2b(dependency)
-                                if dependency not in hashes or hashes[dependency] != dep_hash:
-                                    hashes[dependency] = dep_hash
+                                dep_path = os.path.normpath(dependency)
+
+                                dep_hash = hash_file_blake2b(dep_path)
+                                if dep_path not in hashes or hashes[dep_path] != dep_hash:
+                                    hashes[dep_path] = dep_hash
                                     recompile = True
 
 
@@ -272,7 +273,8 @@ else:
             
 
         # add user extra args
-        command.append(flags)
+        if len(flags) > 0:
+            command.append(flags)
 
 
         # call gcc
