@@ -24,7 +24,7 @@
                 "SW",
                 // "-h"
                 "-w",
-                "/home/brandon/.minecraft/saves/New World"
+                "${workspaceFolder}/test/New World"
             ],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "bear_make"

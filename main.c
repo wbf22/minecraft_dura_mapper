@@ -251,7 +251,7 @@ void print_nbt(nbt_tag_t *tag, int depth) {
     }
 }
 
-void print_region_to_file(const char *region_file_path, const char *file_name) {
+int print_region_to_file(const char *region_file_path, const char *file_name) {
 
     if (mkdir("dump", 0755) == 0) {
         printf("Directory created: %s\n", "dump");
@@ -364,9 +364,10 @@ void print_region_to_file(const char *region_file_path, const char *file_name) {
     free(nbt_data);
     free(compressed);
 
+    return 0;
 }
 
-void rip_textures_from_minecraft_jar(const char *jar_path, const char *out_dir) {
+int rip_textures_from_minecraft_jar(const char *jar_path, const char *out_dir) {
 
 
     if (mkdir(out_dir, 0755) != 0) {
@@ -413,9 +414,11 @@ void rip_textures_from_minecraft_jar(const char *jar_path, const char *out_dir) 
     }
 
     mz_zip_reader_end(&zip);
+
+    return 0;
 }
 
-void rip_block_states_from_minecraft_jar(const char *jar_path, const char *out_dir) {
+int rip_block_states_from_minecraft_jar(const char *jar_path, const char *out_dir) {
 
 
     if (mkdir(out_dir, 0755) != 0) {
@@ -462,9 +465,11 @@ void rip_block_states_from_minecraft_jar(const char *jar_path, const char *out_d
     }
 
     mz_zip_reader_end(&zip);
+
+    return 0;
 }
 
-void rip_json_files_from_minecraft_jar(const char *jar_path, const char *json_files_jar_folder, const char *out_dir) {
+int rip_json_files_from_minecraft_jar(const char *jar_path, const char *json_files_jar_folder, const char *out_dir) {
 
 
     if (mkdir(out_dir, 0755) != 0) {
@@ -511,6 +516,8 @@ void rip_json_files_from_minecraft_jar(const char *jar_path, const char *json_fi
     }
 
     mz_zip_reader_end(&zip);
+
+    return 0;
 }
 
 
@@ -562,7 +569,7 @@ void free_array_of_pointers(void** array) {
  * 
  * The buffer string may be doubled in length if an overflow will occur.
  */
-void bcat(char* buffer, long* buffer_len, char* str2) {
+int bcat(char* buffer, long* buffer_len, char* str2) {
     size_t len = strlen(buffer) + strlen(str2) + 1;
 
     if (len >= *buffer_len-1) {
@@ -582,6 +589,8 @@ void bcat(char* buffer, long* buffer_len, char* str2) {
     else {
         strcat(buffer, str2);   // append str2
     }
+
+    return 0;
 }
 
 /**
@@ -721,7 +730,7 @@ void free_block(Block* block) {
 
 // UTILITY METHODS
 
-void extract_jar(const char *jar_path, const char *out_dir) {
+int extract_jar(const char *jar_path, const char *out_dir) {
     
     if (mkdir(out_dir, 0755) != 0) {
         perror("mkdir failed");
@@ -766,6 +775,8 @@ void extract_jar(const char *jar_path, const char *out_dir) {
     }
 
     mz_zip_reader_end(&zip);
+
+    return 0;
 }
 
 int is_regular_file(const char *dir, const char *name) {
