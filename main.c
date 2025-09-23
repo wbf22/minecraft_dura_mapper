@@ -1044,9 +1044,11 @@ int main(int argc, char **argv) {
         RENDER MCAS
     */
 
-    // DETERMINE ALL AIR EXPOSED BLOCKS IN MCA
-
-    // RENDER EACH ONE, SKIPPING IF COVERED BY ANOTHER BLOCK
+    // START AT CLOSEST TO VIEWPOINT, AND ONLY RENDER BLOCKS THAT WON'T BE COVERED UP
+    /*
+        add more image files as needed
+        - images should be 
+    */
 
     
 

@@ -1,0 +1,38 @@
+one region file is 1024 chunks,,,
+1024 chunks in a region,,,
+each chunk has 256 surface blocks,,,
+each block has 256 pixels on one side,,,
+,,,
+so a region would be:,1024*256*256,67108864,pixels
+,,,
+a typical image is 1920 * 1080,2073600,pixels,
+,,,
+,,,
+so we probaly want to divid regions up,,,
+,,,
+,,,
+SIZE OF REGION SPLIT INTO 4,,,
+256*256*256,16777216,pixels,
+,,,
+SIZE OF REGION SPLIT INTO 8,,,
+128*256*256,8388608,pixels,
+,,,
+SIZE OF REGION SPLIT INTO 16,,,
+64*256*256,4194304,pixels,
+,,,
+SIZE OF REGION SPLIT INTO 32,,,
+32*256*256,2097152,pixels,
+,,,
+SIZE OF REGION SPLIT INTO 64,,,
+16*256*256,1048576,pixels,
+,,,
+,,,
+So it looks we want to split a region into 64 pieces. This would 4x4 chunk sections,,,
+,,,
+<meta> c5=1024*256*256
+<meta> b7=1920*1080
+<meta> b14=256*256*256
+<meta> b17=128*256*256
+<meta> b20=64*256*256
+<meta> b23=32*256*256
+<meta> b26=16*256*256
