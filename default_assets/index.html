@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Leaflet Multiple Images</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Leaflet CSS -->
+    <style>
+        body {
+            margin: 0;
+            background: #111;
+        }
+
+        #map_container {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+            background: #111;
+            cursor: grab;
+        }
+
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+
+        .map-image {
+            display: block;
+            user-select: none; /* prevents accidental text selection */
+            pointer-events: none; /* mouse events go to container */
+            position: absolute;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map_container">
+        <div id="map">
+            
+        </div>
+    </div>
+
+
+
+    <!-- general -->
+    <script>
+
+        const map_container = document.getElementById('map_container');
+        const map = document.getElementById('map');
+
+    </script>
+
+    <!-- add data -->
+    <script>
+        // let IMG_SIZE = 256;
+        // let IMG_SRC = "256x256_test.png";
+
+        // let IMG_SIZE = 1024;
+        // let IMG_SRC = "1024x1024_test.png";
+
+        // let IMG_SIZE = 4096;
+        // let IMG_SRC = "4096x4096_test.png";
+
+        let IMG_SIZE = 8192;
+        let IMG_SRC = "8192x8192_test.png";
+
+
+        let IMAGES = 524288 / IMG_SIZE;
+        // let IMAGES = 524288 / IMG_SIZE;
+
+        for (let x = 0; x < IMAGES; x++) {
+            for (let z = 0; z < IMAGES; z++) {
+                const img = document.createElement("img");
+                img.src = IMG_SRC
+                img.className = "map-image"
+                img.style.top = `${z*IMG_SIZE}px`;
+                img.style.left = `${x*IMG_SIZE}px`;
+                map.appendChild(img);
+
+            }
+        }
+
+    </script>
+
+    <!-- panning -->
+    <script>
+        
+        let isDragging = false;
+        let startX, startY;
+        let offsetX = 0, offsetY = 0;
+        let scale = 0.01;
+        const MAX_SCALE = 10.1;
+        const MIN_SCALE = 0.000001;
+
+        map_container.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX - offsetX;
+            startY = e.clientY - offsetY;
+            map_container.style.cursor = 'grabbing';
+        });
+
+        map_container.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            offsetX = e.clientX - startX;
+            offsetY = e.clientY - startY;
+            map.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+        });
+
+        map_container.addEventListener('mouseup', () => {
+            isDragging = false;
+            map_container.style.cursor = 'grab';
+        });
+
+        map_container.addEventListener('mouseleave', () => {
+            isDragging = false;
+            map_container.style.cursor = 'grab';
+        });
+
+        map_container.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            let old_scale = scale;
+
+            // determine zoom factor
+            let zoomFactor = 0.01 * 20 * scale;
+            // console.log("zoomFactor", zoomFactor);
+            // console.log("scale", scale);
+            
+
+            scale += e.deltaY > 0? zoomFactor : -zoomFactor;
+
+            if (scale < MIN_SCALE) {
+                scale = MIN_SCALE;
+            }
+            if (scale > MAX_SCALE) {
+                scale = MAX_SCALE;
+            }
+
+            // modify offset on zoom
+            let rect = map.getBoundingClientRect();
+            let mouse_x_from_map_left = e.clientX - rect.left;
+            let mouse_y_from_map_top = e.clientY - rect.top;
+
+            let new_mouse_x_from_map_left = scale * mouse_x_from_map_left / old_scale;
+            let new_mouse_y_from_map_top = scale * mouse_y_from_map_top / old_scale;
+
+            offsetX = Math.round(e.clientX - new_mouse_x_from_map_left);
+            offsetY = Math.round(e.clientY - new_mouse_y_from_map_top);
+
+
+            map.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+            console.log("offsetX", offsetX);
+            console.log("offsetY", offsetY);
+            console.log("scale", scale);
+        });
+        
+    </script>
+
+</body>
+
+</html>

@@ -28,6 +28,14 @@
             ],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "bear_make"
-        }
+        },
+        {
+            "name": "Copy Images",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/default_assets/copy_image.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/default_assets"
+        },
     ]
 }

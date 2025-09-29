@@ -6,6 +6,7 @@
 #include <getopt.h>
 #define NBT_IMPLEMENTATION
 #include "dependencies/nbt.h"  // Make sure nbt.h is in your include path
+#include "dependencies/Map.h"
 #include <sys/stat.h> // for stat
 #include <unistd.h>
 
@@ -727,6 +728,9 @@ void free_block(Block* block) {
 }
 
 
+typedef struct {
+    uint8_t pixels[256]; // 16x16 pixel image representing a block (side view kind of thing)
+} RenderedBlock;
 
 // UTILITY METHODS
 
@@ -988,8 +992,25 @@ int compare_mca_paths(const void *a, const void *b) {
     }
 }
 
+char* make_block_tag() {
+
+}
+
+RenderedBlock* get_rendered_block(char* block_tag, Map* rendered_blocks) {
+
+    RenderedBlock* block = at(rendered_blocks, block_tag);
+    
+    // render block if not rendered yet
+    if (block == NULL) {
+        
+    }
+}
+
 
 int main(int argc, char **argv) {
+
+    // extract_jar("/Users/wfowler/Documents/minecraft_dura_mapper/default_assets/1.21.8.jar", "/Users/wfowler/Documents/minecraft_dura_mapper/dump/jar");
+    // return 0;
 
     // PARSE ARGS
     char *jar_path = NULL;
@@ -1033,6 +1054,15 @@ int main(int argc, char **argv) {
         // {"count",   'n', ARG_INT,    "Number of iterations", &count},
     };
     parse_args(argc, argv, options, len(options));
+
+
+    // init rendered block map
+    Map* block_tag_to_rendered_blocks = new_map();
+
+    // init drawn blocks mapp
+    Map* xyz_to_drawn_blocks = new_map();
+    
+    
 
 
     // COLLECT MCA FILES
