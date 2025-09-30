@@ -1,0 +1,56 @@
+,,,,,
+,,,,,
+,layer,eq 2**(2**x),eq 2**(2x),,
+,1,4,4,,
+,2,16,16,,
+,3,256,64,,
+,4,65536,256,,
+,5,4294967296,1024,,
+,6,18446744073709551616,4096,,
+,,,,,
+,,,,,
+,,,,,
+,,,,,
+,,,,,
+,,,,,
+,,,,,
+,,,,,
+,,,,,
+,,,,,
+,,,,our images are 8192x8192,
+,,,,with blocks being 16px that is 8192/16 blocks,512
+,,,,the max minecraft world size is 30000000 blocks,
+,,,,30000000/512,58593.75
+,,,,so we'd need ~60000x~60000 images,
+,,,,using the equation 2**(2**x) we could represent the whole thing with one image at layer 4 which is great!,
+,,,,Hypothetical image count with a world of size 8192x8192 blocks,
+,,,,64x64 images is about the most we want to have in the browser window,
+,,,,at layer 0 this would be 512*64,32768
+,,,,So that's probably bigger than most minecraft worlds already,
+,,,,,
+<meta> c3=2**(2**b3)
+<meta> c4=2**(2**b4)
+<meta> c5=2**(2**b5)
+<meta> c6=2**(2**b6)
+<meta> c7=2**(2**b7)
+<meta> c8=2**(2**b8)
+<meta> d3=2**(2*b3)
+<meta> d4=2**(2*b4)
+<meta> d5=2**(2*b5)
+<meta> d6=2**(2*b6)
+<meta> d7=2**(2*b7)
+<meta> d8=2**(2*b8)
+<meta> f20=8192/16
+<meta> f22=30000000/512
+<meta> f27=512*64
+<meta> color b2=13,115,30
+<meta> color c2=13,115,30
+<meta> color d2=13,115,30
+<meta> wrap e25
+<meta> wrap e28
+<meta> wrap e20
+<meta> wrap e27
+<meta> wrap e19
+<meta> wrap e26
+<meta> wrap e21
+<meta> wrap e24
