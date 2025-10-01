@@ -56,8 +56,8 @@ FOLDER = r'test_images'
 
 # clear folder
 print("clearing directory...")
-shutil.rmtree(FOLDER)
 os.makedirs(FOLDER, exist_ok=True)
+shutil.rmtree(FOLDER)
 
 def copy_image(MAP_SIZE_IN_UNITS, IMAGE_SIZE_IN_UNITS, level, img_src):
 

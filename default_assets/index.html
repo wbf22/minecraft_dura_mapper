@@ -64,7 +64,46 @@
     <!-- init -->
     <script>
 
+        
+    </script>
 
+
+
+
+    <!-- ************ -->
+    <!-- IMAGE TILING -->
+    <!-- ************ -->
+
+
+    <!-- general -->
+    <script>
+        const TARGET_WINDOW_WIDTH_IN_IMAGES = 4;
+
+        const map_container = document.getElementById('map_container');
+        const map = document.getElementById('map');
+        const coordinates = document.getElementById('coordinates');
+
+    </script>
+
+
+    <!-- panning -->
+    <script>
+        
+        let isDragging = false;
+        let startX, startY;
+        let offsetX = window.innerWidth/2, offsetY = window.innerHeight/2;
+        let scale = 0.01;
+        const MAX_SCALE = 10.1;
+        const MIN_SCALE = 0.00001;
+
+        let coor_x = 0;
+        let coor_y = 0;
+        let center_x = 0;
+        let center_y = 0;
+        let start_x_in_units = -window.innerWidth/2;
+        let start_y_in_units = -window.innerHeight/2;
+        let end_x_in_units = window.innerWidth/2;
+        let end_y_in_units = window.innerHeight/2;
         let layers = [
             {
                 start: [-16, -16],
@@ -91,48 +130,6 @@
                 path: "test_images/level_3"
             }
         ];
-
-
-        
-    </script>
-
-
-
-
-    <!-- ************ -->
-    <!-- IMAGE TILING -->
-    <!-- ************ -->
-
-
-    <!-- general -->
-    <script>
-        const TARGET_WINDOW_WIDTH_IN_IMAGES = 16;
-
-        const map_container = document.getElementById('map_container');
-        const map = document.getElementById('map');
-        const coordinates = document.getElementById('coordinates');
-
-    </script>
-
-
-    <!-- panning -->
-    <script>
-        
-        let isDragging = false;
-        let startX, startY;
-        let offsetX = window.innerWidth/2, offsetY = window.innerHeight/2;
-        let scale = 0.01;
-        const MAX_SCALE = 10.1;
-        const MIN_SCALE = 0.00001;
-        let coor_x = 0;
-        let coor_y = 0;
-        let center_x = 0;
-        let center_y = 0;
-        let start_x_in_units = -window.innerWidth/2;
-        let start_y_in_units = -window.innerHeight/2;
-        let end_x_in_units = window.innerWidth/2;
-        let end_y_in_units = window.innerHeight/2;
-
         let UNITS_PER_CURRENT_IMAGE_SIZE = 8192;
 
 
@@ -207,11 +204,19 @@
         function update_coordinates(e) {
 
             const units_per_window_pixel = get_units_per_window_pixel();
+            // console.log("units_per_window_pixel", units_per_window_pixel);
+            // console.log("1/scale", 1/scale);
 
             coor_x = (e.clientX - offsetX) * units_per_window_pixel;
             coor_y = (e.clientY - offsetY) * units_per_window_pixel;
             coordinates.innerHTML = `x: ${coor_x.toFixed(2)}  y: ${coor_y.toFixed(2)}  (pixel not minecraft xz)`;
 
+        }
+
+
+        function update_window_units() {
+
+            const units_per_window_pixel = get_units_per_window_pixel();
             center_x = (window.innerWidth/2 - offsetX) * units_per_window_pixel;
             center_y = (window.innerHeight/2 - offsetY) * units_per_window_pixel;
 
@@ -221,12 +226,16 @@
             start_y_in_units = center_y - window_height_in_units/2;
             end_x_in_units = center_x + window_width_in_units/2;
             end_y_in_units = center_y + window_height_in_units/2;
-            console.log("[", start_x_in_units.toFixed(2), ", ", start_y_in_units.toFixed(2), "] [", end_x_in_units.toFixed(2), ", ", end_y_in_units.toFixed(2), "]");
+
+            // console.log("[", start_x_in_units.toFixed(2), ", ", start_y_in_units.toFixed(2), "] [", end_x_in_units.toFixed(2), ", ", end_y_in_units.toFixed(2), "]");
         }
 
         function get_units_per_window_pixel() {
-            const window_image_size = map.children[0].getBoundingClientRect().width;
-            return UNITS_PER_CURRENT_IMAGE_SIZE / window_image_size;
+            
+            // const window_image_size = map.children[0].getBoundingClientRect().width;
+            // return UNITS_PER_CURRENT_IMAGE_SIZE / window_image_size;
+
+            return 1 / scale;
         }
         
     </script>
@@ -242,23 +251,37 @@
         // let IMG_SIZE = 4096;
         // let IMG_SRC = "4096x4096_test.png";
 
-        const LEVEL = 1;
-
+        let LEVEL = 1;
 
 
         let IMAGES_IN_MAP = new Map();
 
-        function set_images(tile_layers) {
+        function init(tile_layers) {
+            layers = tile_layers;
+            UNITS_PER_CURRENT_IMAGE_SIZE = layers[LEVEL].units_per_image;
+            update_window_units();
+        }
+
+        function set_images() {
 
             // DETERMINE level to stay under max_images_in_view
             
             // get units in window
             const window_width_pixels = window.innerWidth;
-            const units_in_window = window_width_pixels / get_units_per_window_pixel();
+            const units_per_window_pixel = get_units_per_window_pixel();
+            const units_in_window = window_width_pixels * units_per_window_pixel;
 
             const images_per_window = units_in_window / UNITS_PER_CURRENT_IMAGE_SIZE;
 
 
+            let lower_level_images_per_window = 0;
+            if (LEVEL != 0) {
+                lower_level_images_per_window = units_in_window / layers[LEVEL-1].units_per_image;
+            }
+            let upper_level_images_per_window = 0;
+            if (LEVEL+1 < layers.length) {
+                upper_level_images_per_window = units_in_window / layers[LEVEL+1].units_per_image;
+            }
 
             // DECREASE level if there are less images in view than the min
             if (images_per_window < TARGET_WINDOW_WIDTH_IN_IMAGES) {
@@ -266,47 +289,60 @@
                     LEVEL--;
                     IMAGES_IN_MAP.clear();
                     map.replaceChildren();
-                    UNITS_PER_CURRENT_IMAGE_SIZE = tile_layers[LEVEL].units_per_image;
+                    UNITS_PER_CURRENT_IMAGE_SIZE = layers[LEVEL].units_per_image;
                     console.log("LEVEL ", LEVEL);
                 }
             }
             // INCREASE level if there are more images 
             else {
                 // if next level would be closer to MIN_WINDOW_WIDTH_IN_IMAGES increase
-                if (LEVEL+1 < tile_layers.length() && images_per_window > TARGET_WINDOW_WIDTH_IN_IMAGES * 2) {
+                if (LEVEL+1 < layers.length && images_per_window > TARGET_WINDOW_WIDTH_IN_IMAGES * 2) {
                     LEVEL++;
                     IMAGES_IN_MAP.clear();
                     map.replaceChildren();
-                    UNITS_PER_CURRENT_IMAGE_SIZE = tile_layers[LEVEL].units_per_image;
+                    UNITS_PER_CURRENT_IMAGE_SIZE = layers[LEVEL].units_per_image;
                     console.log("LEVEL ", LEVEL);
                 }
             }
 
+            console.log("units_per_window_pixel", units_per_window_pixel);
+            console.log("window_width_pixels", window_width_pixels);
+            console.log("UNITS_PER_CURRENT_IMAGE_SIZE", UNITS_PER_CURRENT_IMAGE_SIZE);
+            console.log("units per window", units_in_window);
+            console.log("images per window", units_in_window / UNITS_PER_CURRENT_IMAGE_SIZE);
 
             // DETERMINE any missing images and load them
-            for (let x = start_x_in_units; x < end_x_in_units; x += UNITS_PER_CURRENT_IMAGE_SIZE) {
-                for (let y = start_y_in_units; y < end_y_in_units; y += UNITS_PER_CURRENT_IMAGE_SIZE) {
+            for (let x = start_x_in_units; x < end_x_in_units + UNITS_PER_CURRENT_IMAGE_SIZE; x += UNITS_PER_CURRENT_IMAGE_SIZE) {
+                for (let y = start_y_in_units; y < end_y_in_units + UNITS_PER_CURRENT_IMAGE_SIZE; y += UNITS_PER_CURRENT_IMAGE_SIZE) {
                     let image_x = round_to_multiple(x, UNITS_PER_CURRENT_IMAGE_SIZE);
                     let image_y = round_to_multiple(y, UNITS_PER_CURRENT_IMAGE_SIZE);
 
                     let file_name = `${image_x}_${image_y}.png`
                     if (!IMAGES_IN_MAP.has(file_name)) {
+
+                        let img_offset_pixels_x = (image_x - center_x);
+                        let img_offset_pixels_y = (image_y - center_y);
+
+                        const path = layers[LEVEL].path + "/" + file_name;
+
                         const img = document.createElement("img");
-                        img.src = IMG_SRC
+                        img.src = path;
                         img.className = "map-image"
-                        // img.style.top = `${z*IMG_SIZE}px`;
-                        // img.style.left = `${x*IMG_SIZE}px`;
+                        img.style.top = `${img_offset_pixels_y}px`;
+                        img.style.left = `${img_offset_pixels_x}px`;
+                        img.style.width = `${UNITS_PER_CURRENT_IMAGE_SIZE}px`;
+                        img.style.height = `${UNITS_PER_CURRENT_IMAGE_SIZE}px`;
                         img.loading = 'lazy';
                         map.appendChild(img);
+
+                        // IMAGES_IN_MAP.set(file_name, img);
+
+                        console.log(path, "img_offset_pixels_x", img_offset_pixels_x, "img_offset_pixels_y", img_offset_pixels_y);
+                        // console.log("img.offsetWidth", img.offsetWidth);
                     }
                 }    
             }
             
-            
-
-
-
-
             
         }
 
@@ -315,29 +351,31 @@
             return div * multiple;
         }
 
-        // set_images(layers, )
+        init(layers);
+        set_images();
 
 
-        let IMG_SIZE = 8192;
-        let IMG_SRC = "pig_8192.png";
 
-        const REGION_SIZE_PIXELS = 32*16*16;
+        // let IMG_SIZE = 8192;
+        // let IMG_SRC = "pig_8192.png";
 
-        let IMAGES = 4 * REGION_SIZE_PIXELS / IMG_SIZE;
-        // let IMAGES = 524288 / IMG_SIZE;
+        // const REGION_SIZE_PIXELS = 32*16*16;
 
-        for (let x = 0; x < IMAGES; x++) {
-            for (let z = 0; z < IMAGES; z++) {
-                const img = document.createElement("img");
-                img.src = IMG_SRC
-                img.className = "map-image"
-                img.style.top = `${z*IMG_SIZE}px`;
-                img.style.left = `${x*IMG_SIZE}px`;
-                img.loading = 'lazy';
-                map.appendChild(img);
+        // let IMAGES = 4 * REGION_SIZE_PIXELS / IMG_SIZE;
+        // // let IMAGES = 524288 / IMG_SIZE;
 
-            }
-        }
+        // for (let x = 0; x < IMAGES; x++) {
+        //     for (let z = 0; z < IMAGES; z++) {
+        //         const img = document.createElement("img");
+        //         img.src = IMG_SRC
+        //         img.className = "map-image"
+        //         img.style.top = `${z*IMG_SIZE}px`;
+        //         img.style.left = `${x*IMG_SIZE}px`;
+        //         img.loading = 'lazy';
+        //         map.appendChild(img);
+
+        //     }
+        // }
 
     </script>
 

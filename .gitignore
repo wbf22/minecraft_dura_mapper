@@ -1,3 +1,4 @@
 build/
 dump/
 default_assets/test_images/
+.DS_Store
