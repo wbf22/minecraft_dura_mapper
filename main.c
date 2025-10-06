@@ -7,6 +7,7 @@
 #define NBT_IMPLEMENTATION
 #include "dependencies/nbt.h"  // Make sure nbt.h is in your include path
 #include "dependencies/Map.h"
+#include "dependencies/cJSON.h"
 #include <sys/stat.h> // for stat
 #include <unistd.h>
 
@@ -14,14 +15,19 @@
 #include <windows.h>
 #else
 #include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 
 #define SECTION_SIZE 16
 #define BLOCKS_PER_SECTION (SECTION_SIZE*SECTION_SIZE*SECTION_SIZE)
 
+char* ANGLE = "SW";
 
-static char* ANGLE = "SW";
+char* RESET = "\033[0m";
+char* RED = "\033[252;3;3m";
+char* YELLOW = "\033[252;186;3m";
 
 
 // DUMPERS
@@ -561,6 +567,19 @@ void free_array_of_pointers(void** array) {
     }
 }
 
+void resize_if_needed(void*** array, int new_size, int *capacity, size_t element_size) {
+
+    if (new_size >= *capacity) { // directly use *capacity, no need for cp
+        *capacity *= 2;
+        void **tmp = realloc(*array, (*capacity) * element_size);
+        if (!tmp) {
+            fprintf(stderr, "Failed resizing an array. Ran out of memory probably\n");
+            exit(-1);
+        }
+        *array = tmp;
+    }
+}
+
 
 
 // STRINGS
@@ -611,7 +630,39 @@ char* cat(char* str, char* app) {
     return result;
 }
 
+int ends_with(const char *str, const char *suffix) {
+    if (!str || !suffix) return 0;
 
+    size_t len_str = strlen(str);
+    size_t len_suffix = strlen(suffix);
+
+    if (len_suffix > len_str) return 0;
+
+    // Compare the end of str with suffix
+    return strcmp(str + len_str - len_suffix, suffix) == 0;
+}
+
+/**
+ * Splits a string returned the amount of splits created in 'count'
+ */
+char** split(char* str, char* delim, int* count) {
+
+    *count = 0;
+    char** splits = malloc(1*sizeof(char*));
+    int array_size = 1;
+    
+    char *token = strtok(str, delim);
+    while (token != NULL) {
+        
+        resize_if_needed(&splits, *count+1, &array_size, sizeof(char*));
+        token = strtok(NULL, delim);
+
+        splits[*count] = token;
+        *count++;
+    }
+
+    return splits;
+}
 
 
 // ARG PARSER
@@ -729,8 +780,10 @@ void free_block(Block* block) {
 
 
 typedef struct {
-    uint8_t pixels[256]; // 16x16 pixel image representing a block (side view kind of thing)
+    int16_t pixels[768]; // 16x16 pixel image representing a block (side view kind of thing)
 } RenderedBlock;
+
+
 
 // UTILITY METHODS
 
@@ -762,7 +815,7 @@ int extract_jar(const char *jar_path, const char *out_dir) {
         const char *name = stat.m_filename;
 
         // Only extract block textures
-        if (strstr(name, ".json")) {
+        if (strstr(name, ".json") || strstr(name, ".png")) {
 
             // printf("Extracting %s...\n", name);
 
@@ -830,12 +883,7 @@ char **collect_files(const char *path, int *out_count) {
             continue;
 
         // Grow array if needed
-        if (count >= capacity) {
-            capacity *= 2;
-            char **tmp = realloc(files, capacity * sizeof(char*));
-            if (!tmp) break;
-            files = tmp;
-        }
+        resize_if_needed(&files, count, &capacity, sizeof(char*));
         
         // Convert wchar_t filename to UTF-8
         size_t len_name = wcstombs(NULL, findData.cFileName, 0);
@@ -881,13 +929,7 @@ char **collect_files(const char *path, int *out_count) {
 
         if (!is_regular_file(path, entry->d_name)) continue;
 
-        if (count >= capacity) {
-            capacity *= 2;
-            char **tmp = realloc(files, capacity * sizeof(char*));
-            if (!tmp) break;
-            files = tmp;
-        }
-
+        resize_if_needed(&files, count, &capacity, sizeof(char*));
 
         char fullpath[1024];
         snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
@@ -996,24 +1038,200 @@ char* make_block_tag() {
 
 }
 
-RenderedBlock* get_rendered_block(char* block_tag, Map* rendered_blocks) {
 
-    RenderedBlock* block = at(rendered_blocks, block_tag);
+int is_directory(const char *dir, const char *entry_name) {
+    char fullpath[1024];
+    snprintf(fullpath, sizeof(fullpath), "%s/%s", dir, entry_name);
+
+    struct stat statbuf;
+    if (stat(fullpath, &statbuf) != 0) return 0;
+    return S_ISDIR(statbuf.st_mode);
+}
+
+char **collect_folders(const char *path, int *out_count) {
+    char **dirs = NULL;
+    int count = 0;
+    int capacity = 10;
+
+    dirs = malloc(capacity * sizeof(char*));
+    if (!dirs) {
+        perror("malloc");
+        *out_count = 0;
+        return NULL;
+    }
+
+#ifdef _WIN32
+    wchar_t wpath[MAX_PATH];
+    mbstowcs(wpath, path, MAX_PATH);
+
+    wchar_t search_path[MAX_PATH];
+    swprintf(search_path, MAX_PATH, L"%ls\\*", wpath);
+
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW(search_path, &findData);
+    if (hFind == INVALID_HANDLE_VALUE) {
+        free(dirs);
+        *out_count = 0;
+        return NULL;
+    }
+
+    do {
+        if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0)
+            continue;
+
+        if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+            continue; // Only directories
+
+        resize_if_needed(&dirs, count, &capacity, sizeof(char*));
+
+        size_t len_name = wcstombs(NULL, findData.cFileName, 0);
+        if (len_name == (size_t)-1) continue;
+
+        char *filename = malloc(len_name + 1);
+        if (!filename) break;
+        wcstombs(filename, findData.cFileName, len_name + 1);
+
+        size_t len_path = strlen(path);
+        size_t len_full = len_path + 1 + len_name + 1;
+        char *fullpath = malloc(len_full);
+        if (!fullpath) {
+            free(filename);
+            break;
+        }
+
+        snprintf(fullpath, len_full, "%s\\%s", path, filename);
+        free(filename);
+
+        dirs[count++] = fullpath;
+
+    } while (FindNextFileW(hFind, &findData));
+
+    FindClose(hFind);
+
+#else
+    DIR *dir = opendir(path);
+    if (!dir) {
+        perror("opendir");
+        free(dirs);
+        *out_count = 0;
+        return NULL;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.' &&
+           (entry->d_name[1] == '\0' ||
+           (entry->d_name[1] == '.' && entry->d_name[2] == '\0')))
+            continue;
+
+        if (!is_directory(path, entry->d_name)) continue;
+
+        resize_if_needed(&dirs, count, &capacity, sizeof(char*));
+
+        char fullpath[1024];
+        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
+        dirs[count++] = strdup(fullpath);
+
+        // recurse
+        int rec_count;
+        char **rec_dirs = collect_folders(fullpath, &rec_count);
+        for (int r = 0; r < rec_count; r++) {
+            resize_if_needed(&dirs, count, &capacity, sizeof(char*));
+            dirs[count++] = rec_dirs[r];
+        }
+        free(rec_dirs); // free array
+    }
+
+    closedir(dir);
+#endif
+
+    *out_count = count;
+    return dirs;
+}
+
+char* BLOCKS_PATH = "dump/jar/assets/minecraft/models/block";
+void find_block_models() {
+
+    int count;
+    char **dirs = collect_folders("dump/jar", &count);
+    for (int i = 0; i < count; i++) {
+        if (ends_with(dirs[i], "models/block")) {
+            printf("%s\n", dirs[i]);
+            BLOCKS_PATH = cat(dirs[i], "/");
+        }
+        free(dirs[i]); // free each path
+    }
+    free(dirs); // free array
+}
+
+
+
+/**
+ * Returns pixels (16x16) for a block. 
+ * 
+ * Blank pixels are set as -1.
+ * 
+ * The block_minecraft_name should be provided like 'minecraft:block/stairs'
+ */
+RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_blocks) {
+
+    RenderedBlock* block = at(rendered_blocks, block_minecraft_name);
     
     // render block if not rendered yet
     if (block == NULL) {
-        
+        // RENDER BLOCK SHAPE
+        cJSON *json = cJSON_Parse(cat(BLOCKS_PATH, block_minecraft_name));
+
+        // get object dimensions
+        cJSON *model_json = json;
+        while (!cJSON_HasObjectItem(model_json, "elements")) {
+            if (cJSON_HasObjectItem(model_json, "parent")) {
+                char* parent = cJSON_GetObjectItem(model_json, "parent")->valuestring;
+                int c = 0;
+                char** splits = split(parent, "/", &c);
+                parent = splits[1];
+                model_json = cJSON_Parse(cat(BLOCKS_PATH, parent));
+            }
+            else {
+                break;
+            }
+        }
+
+        int16_t pixels_NE[768];
+        int16_t pixels_SE[768];
+        int16_t pixels_SW[768];
+        int16_t pixels_NW[768];
+
+        if (cJSON_HasObjectItem(model_json, "elements")) {
+            cJSON* elements = cJSON_GetObjectItem(model_json, "elements");
+            int num_elements = cJSON_GetArraySize(elements);
+            
+            for (int i = 0; i < num_elements; i++) {
+                
+            }
+        }
+        else {
+            printf("%sCouldn't find block model for '%s' so we'll just use the default block for that one.%s\n", YELLOW, block_minecraft_name, RESET);
+
+        }
+
+        // render each orientation
+
+
+        // GET TEXTURE
+
+        // GENERATE IMAGE
     }
+
+
+    return block;
 }
 
 
 int main(int argc, char **argv) {
 
-    // extract_jar("/Users/wfowler/Documents/minecraft_dura_mapper/default_assets/1.21.8.jar", "/Users/wfowler/Documents/minecraft_dura_mapper/dump/jar");
-    // return 0;
-
     // PARSE ARGS
-    char *jar_path = NULL;
+    char *jar_path = "default_assets/1.21.8.jar";
     char *out_dir = NULL;
     char *angle = NULL;
     char *path = NULL;
@@ -1056,6 +1274,11 @@ int main(int argc, char **argv) {
     parse_args(argc, argv, options, len(options));
 
 
+    // extract minecraft jar and set paths to model files
+    extract_jar(jar_path, "dump/jar");
+    find_block_models();
+
+
     // init rendered block map
     Map* block_tag_to_rendered_blocks = new_map();
 
@@ -1090,6 +1313,8 @@ int main(int argc, char **argv) {
         add more image files as needed
         - images should be 
     */
+
+
 
     
 

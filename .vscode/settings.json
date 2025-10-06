@@ -3,6 +3,15 @@
         "miniz.h": "c",
         "nbt.h": "c",
         "dirent.h": "c",
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "map.h": "c",
+        "unistd.h": "c",
+        "stat.h": "c",
+        "bitset": "c",
+        "unordered_map": "c",
+        "__bit_reference": "c",
+        "__split_buffer": "c",
+        "string": "c",
+        "vector": "c"
     }
 }

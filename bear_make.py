@@ -23,6 +23,7 @@ python3 bear_make.py my_make_file
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -218,7 +219,9 @@ else:
                     # recompile if dependencies have changes
                     if not recompile:
                         result = subprocess.run(['gcc', '-MM', file], capture_output=True, text=True)
-                        dependencies = result.stdout.replace('\\', '').replace('\n', '').replace('  ', ' ').split(' ')
+                        dependencies_str = result.stdout.replace('\\', '').replace('\n', '')
+                        dependencies_str = re.sub(r'\s+', ' ', dependencies_str)
+                        dependencies = dependencies_str.split(' ')
                         if len(dependencies) > 2:
                             dependencies = dependencies[2:]
                             for dependency in dependencies:
