@@ -95,6 +95,7 @@
         let scale = 0.01;
         const MAX_SCALE = 10.1;
         const MIN_SCALE = 0.00001;
+        const LEVEL_0_SIZE = 1024;
 
         let coor_x = 0;
         let coor_y = 0;
@@ -108,29 +109,29 @@
             {
                 start: [-16, -16],
                 end : [15, 15],
-                units_per_image : 8192,
+                units_per_image : LEVEL_0_SIZE,
                 path: "test_images/level_0"
             },
             {
                 start: [-4, -4],
                 end : [3, 3],
-                units_per_image : 8192*4,
+                units_per_image : LEVEL_0_SIZE*4,
                 path: "test_images/level_1"
             },
             {
                 start: [-1, -1],
                 end : [0, 0],
-                units_per_image : 8192*16,
+                units_per_image : LEVEL_0_SIZE*16,
                 path: "test_images/level_2"
             },
             {
                 start: [-1, -1],
                 end : [0, 0],
-                units_per_image : 8192*256,
+                units_per_image : LEVEL_0_SIZE*256,
                 path: "test_images/level_3"
             }
         ];
-        let UNITS_PER_CURRENT_IMAGE_SIZE = 8192;
+        let UNITS_PER_CURRENT_IMAGE_SIZE = LEVEL_0_SIZE;
 
 
         map.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
@@ -149,6 +150,9 @@
             offsetX = e.clientX - startX;
             offsetY = e.clientY - startY;
             map.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+
+            // load images in view
+            set_images();
 
         });
 
@@ -199,6 +203,8 @@
             // console.log("scale", scale);
 
             update_coordinates(e);
+
+            set_images();
         });
 
         function update_coordinates(e) {
@@ -252,6 +258,7 @@
         // let IMG_SRC = "4096x4096_test.png";
 
         let LEVEL = 1;
+        let REFRESH_RUNNING = false;
 
 
         let IMAGES_IN_MAP = new Map();
@@ -263,6 +270,15 @@
         }
 
         function set_images() {
+
+            if (REFRESH_RUNNING) {
+                return;
+            }
+            REFRESH_RUNNING = true;
+
+            update_window_units();
+            // console.time("set_images");
+
 
             // DETERMINE level to stay under max_images_in_view
             
@@ -284,65 +300,73 @@
             }
 
             // DECREASE level if there are less images in view than the min
-            if (images_per_window < TARGET_WINDOW_WIDTH_IN_IMAGES) {
+            const old_level = LEVEL;
+            if (Math.abs(images_per_window - TARGET_WINDOW_WIDTH_IN_IMAGES) > Math.abs(lower_level_images_per_window - TARGET_WINDOW_WIDTH_IN_IMAGES)) {
                 if (LEVEL != 0) {
                     LEVEL--;
-                    IMAGES_IN_MAP.clear();
-                    map.replaceChildren();
-                    UNITS_PER_CURRENT_IMAGE_SIZE = layers[LEVEL].units_per_image;
-                    console.log("LEVEL ", LEVEL);
                 }
             }
             // INCREASE level if there are more images 
-            else {
+            else if (Math.abs(images_per_window - TARGET_WINDOW_WIDTH_IN_IMAGES) > Math.abs(upper_level_images_per_window - TARGET_WINDOW_WIDTH_IN_IMAGES)) {
                 // if next level would be closer to MIN_WINDOW_WIDTH_IN_IMAGES increase
-                if (LEVEL+1 < layers.length && images_per_window > TARGET_WINDOW_WIDTH_IN_IMAGES * 2) {
+                if (LEVEL+1 < layers.length) {
                     LEVEL++;
-                    IMAGES_IN_MAP.clear();
-                    map.replaceChildren();
-                    UNITS_PER_CURRENT_IMAGE_SIZE = layers[LEVEL].units_per_image;
-                    console.log("LEVEL ", LEVEL);
                 }
             }
 
-            console.log("units_per_window_pixel", units_per_window_pixel);
-            console.log("window_width_pixels", window_width_pixels);
-            console.log("UNITS_PER_CURRENT_IMAGE_SIZE", UNITS_PER_CURRENT_IMAGE_SIZE);
-            console.log("units per window", units_in_window);
-            console.log("images per window", units_in_window / UNITS_PER_CURRENT_IMAGE_SIZE);
+            if (old_level != LEVEL) {
+                IMAGES_IN_MAP.clear();
+                map.replaceChildren();
+                UNITS_PER_CURRENT_IMAGE_SIZE = layers[LEVEL].units_per_image;
+                console.log("LEVEL ", LEVEL);
+                console.log("units_per_window_pixel", units_per_window_pixel);
+                console.log("window_width_pixels", window_width_pixels);
+                console.log("UNITS_PER_CURRENT_IMAGE_SIZE", UNITS_PER_CURRENT_IMAGE_SIZE);
+                console.log("units per window", units_in_window);
+                console.log("images per window", units_in_window / UNITS_PER_CURRENT_IMAGE_SIZE);
+                console.log("start_x_in_units", start_x_in_units);
+                console.log("end_x_in_units", end_x_in_units);
+            }
+
 
             // DETERMINE any missing images and load them
+            let amount_loaded = 0;
             for (let x = start_x_in_units; x < end_x_in_units + UNITS_PER_CURRENT_IMAGE_SIZE; x += UNITS_PER_CURRENT_IMAGE_SIZE) {
                 for (let y = start_y_in_units; y < end_y_in_units + UNITS_PER_CURRENT_IMAGE_SIZE; y += UNITS_PER_CURRENT_IMAGE_SIZE) {
                     let image_x = round_to_multiple(x, UNITS_PER_CURRENT_IMAGE_SIZE);
                     let image_y = round_to_multiple(y, UNITS_PER_CURRENT_IMAGE_SIZE);
 
                     let file_name = `${image_x}_${image_y}.png`
+                    // console.log("file_name", file_name, IMAGES_IN_MAP.has(file_name));
                     if (!IMAGES_IN_MAP.has(file_name)) {
 
-                        let img_offset_pixels_x = (image_x - center_x);
-                        let img_offset_pixels_y = (image_y - center_y);
 
                         const path = layers[LEVEL].path + "/" + file_name;
 
                         const img = document.createElement("img");
                         img.src = path;
                         img.className = "map-image"
-                        img.style.top = `${img_offset_pixels_y}px`;
-                        img.style.left = `${img_offset_pixels_x}px`;
+                        img.style.top = `${image_y}px`;
+                        img.style.left = `${image_x}px`;
                         img.style.width = `${UNITS_PER_CURRENT_IMAGE_SIZE}px`;
                         img.style.height = `${UNITS_PER_CURRENT_IMAGE_SIZE}px`;
                         img.loading = 'lazy';
                         map.appendChild(img);
 
-                        // IMAGES_IN_MAP.set(file_name, img);
+                        amount_loaded++;
 
-                        console.log(path, "img_offset_pixels_x", img_offset_pixels_x, "img_offset_pixels_y", img_offset_pixels_y);
+                        IMAGES_IN_MAP.set(file_name, img);
+
+                        // console.log(path, "img_offset_pixels_x", img_offset_pixels_x, "img_offset_pixels_y", img_offset_pixels_y);
                         // console.log("img.offsetWidth", img.offsetWidth);
                     }
                 }    
             }
             
+            
+            // console.log("amount_loaded", amount_loaded);
+            // console.timeEnd("set_images");
+            REFRESH_RUNNING = false;
             
         }
 

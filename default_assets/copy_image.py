@@ -64,6 +64,7 @@ def copy_image(MAP_SIZE_IN_UNITS, IMAGE_SIZE_IN_UNITS, level, img_src):
     print("level: ", level)
 
     half = math.ceil(MAP_SIZE_IN_UNITS/2)
+    half = max(half, IMAGE_SIZE_IN_UNITS)
     for x in range(-half, half, IMAGE_SIZE_IN_UNITS):
         for z in range(-half, half, IMAGE_SIZE_IN_UNITS):
             path = f"{FOLDER}/level_{level}"
@@ -77,7 +78,7 @@ def copy_image(MAP_SIZE_IN_UNITS, IMAGE_SIZE_IN_UNITS, level, img_src):
 REGION_SIZE_PIXELS = 32*16*16 # one Region (32 chunks, of 16 blocks, of 16 pixels)
 MAP_SIZE = 32*REGION_SIZE_PIXELS
 
-copy_image(MAP_SIZE, 8192, 0, 'pig_8192.png')
-copy_image(MAP_SIZE, 8192*(2**(2**1)), 1, 'level_1.png')
-copy_image(MAP_SIZE, 8192*(2**(2**2)), 2, 'level_2.png')
-copy_image(MAP_SIZE, 8192*(2**(2**3)), 3, 'level_3.png')
+copy_image(MAP_SIZE, 1024, 0, 'pig_1024/level_0.png')
+copy_image(MAP_SIZE, 1024*(2**(2**1)), 1, 'pig_1024/level_1.png')
+copy_image(MAP_SIZE, 1024*(2**(2**2)), 2, 'pig_1024/level_2.png')
+copy_image(MAP_SIZE, 1024*(2**(2**3)), 3, 'pig_1024/level_3.png')
