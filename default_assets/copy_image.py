@@ -82,3 +82,8 @@ copy_image(MAP_SIZE, 1024, 0, 'pig_1024/level_0.png')
 copy_image(MAP_SIZE, 1024*(2**(2**1)), 1, 'pig_1024/level_1.png')
 copy_image(MAP_SIZE, 1024*(2**(2**2)), 2, 'pig_1024/level_2.png')
 copy_image(MAP_SIZE, 1024*(2**(2**3)), 3, 'pig_1024/level_3.png')
+
+# copy_image(MAP_SIZE, 8192, 0, 'pig_8192/level_0.png')
+# copy_image(MAP_SIZE, 8192*(2**(2**1)), 1, 'pig_8192/level_1.png')
+# copy_image(MAP_SIZE, 8192*(2**(2**2)), 2, 'pig_8192/level_2.png')
+# copy_image(MAP_SIZE, 8192*(2**(2**3)), 3, 'pig_8192/level_3.png')
