@@ -12,6 +12,9 @@
         "__bit_reference": "c",
         "__split_buffer": "c",
         "string": "c",
-        "vector": "c"
+        "vector": "c",
+        "cjson.h": "c",
+        "stb_image.h": "c",
+        "__locale": "c"
     }
 }

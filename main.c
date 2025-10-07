@@ -8,6 +8,7 @@
 #include "dependencies/nbt.h"  // Make sure nbt.h is in your include path
 #include "dependencies/Map.h"
 #include "dependencies/cJSON.h"
+#include "dependencies/stb_image.h"
 #include <sys/stat.h> // for stat
 #include <unistd.h>
 
@@ -780,7 +781,7 @@ void free_block(Block* block) {
 
 
 typedef struct {
-    int16_t pixels[768]; // 16x16 pixel image representing a block (side view kind of thing)
+    uint8_t pixels[16*16*4]; // 16x16 pixel image representing a block (side view kind of thing)
 } RenderedBlock;
 
 
@@ -1149,7 +1150,8 @@ char **collect_folders(const char *path, int *out_count) {
     return dirs;
 }
 
-char* BLOCKS_PATH = "dump/jar/assets/minecraft/models/block";
+char* BLOCKS_PATH = "dump/jar/assets/minecraft/models/block/";
+char* TEXTURE_PATH = "dump/jar/assets/minecraft/textures/";
 void find_block_models() {
 
     int count;
@@ -1159,11 +1161,112 @@ void find_block_models() {
             printf("%s\n", dirs[i]);
             BLOCKS_PATH = cat(dirs[i], "/");
         }
+        else if (ends_with(dirs[i], "textures")) {
+            printf("%s\n", dirs[i]);
+            TEXTURE_PATH = cat(dirs[i], "/");
+        }
         free(dirs[i]); // free each path
     }
     free(dirs); // free array
 }
 
+// Converts the x y of a pixel to an index in the array
+int pixel_index(int x, int y, int image_width) {
+    return (y * image_width + x) * 3;
+}
+
+uint8_t* load_texture(char* texture_minecraft_name, int* width, int* height) {
+    int c = 0;
+    char** splits = split(texture_minecraft_name, "/", &c);
+    texture_minecraft_name = splits[1];
+    char* path = cat(TEXTURE_PATH, texture_minecraft_name);
+    
+    int n;
+    uint8_t *data = stbi_load(path, width, height, &n, 4);
+    free(path);
+
+    return data;
+}
+
+void swap(int* a, int* b) {
+    int a_i = *a;
+    int b_i = *b;
+    *a = b_i;
+    *b = a_i;
+}
+
+void flip(int* a, int flip_value) {
+    int dist = flip_value - *a;
+    *a = flip_value + dist;
+}
+
+void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
+
+    // DETERMINE indices
+    int model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+    int model_x_end = cJSON_GetArrayItem(to, 0)->valueint;
+    int model_y_start = cJSON_GetArrayItem(to, 1)->valueint;
+    int model_y_end = model_y_start;
+    int model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+    int model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
+
+    if (side == 0) {
+        // no change
+    }
+    else if (side == 1) {
+        // 8, 8, 0 -> 16, 8, 8
+        // 16, 16, 16 -> 0, 16, 16
+        // swap x and z for both
+        // flip x for both
+        
+        swap(&model_x_start, &model_z_start);
+        swap(&model_x_end, &model_z_end);
+
+        flip(&model_x_start, 8);
+        flip(&model_x_end, 8);
+    }
+    else if (side == 2) {
+        // 8, 8, 0 -> 8, 8, 16
+        // 16, 16, 16 -> 0, 16, 0
+        // flip z for both
+        // flip x for both 
+        
+        flip(&model_z_start, 8);
+        flip(&model_z_end, 8);
+
+        flip(&model_x_start, 8);
+        flip(&model_x_end, 8);
+    }
+    else if (side == 3) {
+        // 8, 8, 0 -> 0, 8, 8
+        // 16, 16, 16 -> 16, 16, 0
+        // swap x and z for both
+        // flip z for both
+
+        swap(&model_x_start, &model_z_start);
+        swap(&model_x_end, &model_z_end);
+
+        flip(&model_z_start, 8);
+        flip(&model_z_end, 8);
+    }
+
+
+    // FOR EACH square walk x y of square on texture converting to image pixels
+    int x_step = (model_x_start <= model_x_end)? 1 : -1;
+    int y_step = (model_y_start <= model_y_end)? 1 : -1;
+    int z_step = (model_z_start <= model_z_end)? 1 : -1;
+
+    for (int x = model_x_start; x != model_x_end; x+=x_step) {
+        for (int y = model_y_start; y != model_y_end; y+=y_step) {
+            for (int z = model_z_start; z != model_z_end; z+=z_step) {
+                
+            }
+        }
+    }
+
+
+
+}
 
 
 /**
@@ -1182,7 +1285,25 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
         // RENDER BLOCK SHAPE
         cJSON *json = cJSON_Parse(cat(BLOCKS_PATH, block_minecraft_name));
 
-        // get object dimensions
+        // GET TEXTURES
+        uint8_t* top_texture; // 16x16x4
+        uint8_t* side_texture; // 16x16x4
+        if (cJSON_HasObjectItem(json, "textures")) {
+            cJSON* textures = cJSON_GetObjectItem(json, "textures");
+            if (cJSON_HasObjectItem(textures, "all")) {
+                cJSON* all = cJSON_GetObjectItem(textures, "all");
+                top_texture = load_texture(all->valuestring, 16, 16);
+                side_texture = top_texture;
+            }
+            else if (cJSON_HasObjectItem(textures, "wall")) {
+                cJSON* wall = cJSON_GetObjectItem(textures, "wall");
+                top_texture = load_texture(wall->valuestring, 16, 16);
+                side_texture = top_texture;
+            }
+        }
+
+
+        // GET OBJECT DIMENSIONS
         cJSON *model_json = json;
         while (!cJSON_HasObjectItem(model_json, "elements")) {
             if (cJSON_HasObjectItem(model_json, "parent")) {
@@ -1190,30 +1311,50 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
                 int c = 0;
                 char** splits = split(parent, "/", &c);
                 parent = splits[1];
-                model_json = cJSON_Parse(cat(BLOCKS_PATH, parent));
+                char* path = cat(BLOCKS_PATH, parent);
+                model_json = cJSON_Parse(path);
+                free(path);
             }
             else {
                 break;
             }
         }
 
-        int16_t pixels_NE[768];
-        int16_t pixels_SE[768];
-        int16_t pixels_SW[768];
-        int16_t pixels_NW[768];
+        uint8_t* pixels_NE[16*16*4] = {0};
+        uint8_t* pixels_SE[16*16*4] = {0};
+        uint8_t* pixels_SW[16*16*4] = {0};
+        uint8_t* pixels_NW[16*16*4] = {0};
 
+        int squares[4][3];
         if (cJSON_HasObjectItem(model_json, "elements")) {
             cJSON* elements = cJSON_GetObjectItem(model_json, "elements");
             int num_elements = cJSON_GetArraySize(elements);
             
-            for (int i = 0; i < num_elements; i++) {
-                
+            for (int side = 0; side < 4; side++) {
+                for (int i = 0; i < num_elements; i++) {
+                    cJSON* element = cJSON_GetArrayItem(elements, i);
+
+                    // DETERMINE the 3 squares facing the viewer
+                    cJSON* from = cJSON_GetObjectItem(element, "from");
+                    cJSON* to = cJSON_GetObjectItem(element, "to");
+
+
+                    // top square
+                    
+
+                    // left square
+
+                    // right square
+
+
+                }
             }
         }
         else {
             printf("%sCouldn't find block model for '%s' so we'll just use the default block for that one.%s\n", YELLOW, block_minecraft_name, RESET);
 
         }
+        cJSON_free(json);
 
         // render each orientation
 
