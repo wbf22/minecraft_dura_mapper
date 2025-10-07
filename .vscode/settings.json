@@ -15,6 +15,10 @@
         "vector": "c",
         "cjson.h": "c",
         "stb_image.h": "c",
-        "__locale": "c"
+        "__locale": "c",
+        "stb_image_write.h": "c",
+        "ios": "c",
+        "queue": "c",
+        "stack": "c"
     }
 }

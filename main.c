@@ -8,7 +8,10 @@
 #include "dependencies/nbt.h"  // Make sure nbt.h is in your include path
 #include "dependencies/Map.h"
 #include "dependencies/cJSON.h"
+#define STB_IMAGE_IMPLEMENTATION
 #include "dependencies/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "dependencies/stb_image_write.h"
 #include <sys/stat.h> // for stat
 #include <unistd.h>
 
@@ -614,22 +617,63 @@ int bcat(char* buffer, long* buffer_len, char* str2) {
     return 0;
 }
 
+
+
+char* CAT(char* str, ...) {
+    
+    
+    if (!str) str = "";  // handle NULL as empty string
+
+    size_t total_len = strlen(str);
+
+    // First pass: compute total length
+    va_list args;
+    va_start(args, str);
+
+    char* next;
+    while ((next = va_arg(args, char*)) != NULL) {
+        if (!next) next = "";  // treat NULL as empty
+        total_len += strlen(next);
+    }
+
+    va_end(args);
+
+    // Allocate result string
+    char* result = malloc(total_len + 1);
+    if (!result) return NULL;
+
+    // Copy strings into result
+    strcpy(result, str);
+
+    va_start(args, str);
+    while ((next = va_arg(args, char*)) != NULL) {
+        if (!next) next = "";
+        strcat(result, next);
+    }
+    va_end(args);
+
+    return result;
+}
+
 /**
  * Combines the two strings. creating a new string. Neither input string is freed.
  */
 char* cat(char* str, char* app) {
-    if (!str) str = "";  // treat NULL as empty string
-    if (!app) app = "";
+    // if (!str) str = "";  // treat NULL as empty string
+    // if (!app) app = "";
     
-    size_t len = strlen(str) + strlen(app) + 1;
-    char *result = malloc(len);
-    if (!result) return NULL;
+    // size_t len = strlen(str) + strlen(app) + 1;
+    // char *result = malloc(len);
+    // if (!result) return NULL;
 
-    strcpy(result, str);
-    strcat(result, app);
+    // strcpy(result, str);
+    // strcat(result, app);
 
-    return result;
+    // return result;
+
+    return CAT(str, app, NULL);
 }
+
 
 int ends_with(const char *str, const char *suffix) {
     if (!str || !suffix) return 0;
@@ -647,20 +691,24 @@ int ends_with(const char *str, const char *suffix) {
  * Splits a string returned the amount of splits created in 'count'
  */
 char** split(char* str, char* delim, int* count) {
+    // copy strings since literals can't be processed by strtok
+    char* strn = strdup(str);
 
+    // split
     *count = 0;
-    char** splits = malloc(1*sizeof(char*));
-    int array_size = 1;
+    char** splits = malloc(2*sizeof(char*));
+    int array_size = 2;
     
-    char *token = strtok(str, delim);
+    char *token = strtok(strn, delim);
     while (token != NULL) {
         
         resize_if_needed(&splits, *count+1, &array_size, sizeof(char*));
-        token = strtok(NULL, delim);
 
-        splits[*count] = token;
-        *count++;
+        splits[*count] = strdup(token);
+        (*count)++;
+        token = strtok(NULL, delim);
     }
+    free(strn);
 
     return splits;
 }
@@ -944,6 +992,37 @@ char **collect_files(const char *path, int *out_count) {
     return files;
 }
 
+char* read_file(const char* filename) {
+    FILE* fp = fopen(filename, "rb");  // open binary to avoid issues with line endings
+    if (!fp) {
+        perror("fopen");
+        return NULL;
+    }
+
+    // Seek to end to get file size
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    rewind(fp);
+
+    char* buffer = (char*)malloc(size + 1);
+    if (!buffer) {
+        fclose(fp);
+        return NULL;
+    }
+
+    size_t read_bytes = fread(buffer, 1, size, fp);
+    fclose(fp);
+
+    if (read_bytes != size) {
+        free(buffer);
+        return NULL;
+    }
+
+    buffer[size] = '\0';  // null-terminate
+    return buffer;
+}
+
+
 void substr(char* dest, char* src, int start_inclusive, int end_exclusive) {
     int len = end_exclusive - start_inclusive;
     strncpy(dest, src + start_inclusive, len);
@@ -1161,7 +1240,7 @@ void find_block_models() {
             printf("%s\n", dirs[i]);
             BLOCKS_PATH = cat(dirs[i], "/");
         }
-        else if (ends_with(dirs[i], "textures")) {
+        else if (ends_with(dirs[i], "textures/block")) {
             printf("%s\n", dirs[i]);
             TEXTURE_PATH = cat(dirs[i], "/");
         }
@@ -1170,23 +1249,11 @@ void find_block_models() {
     free(dirs); // free array
 }
 
-// Converts the x y of a pixel to an index in the array
+// Converts the x y of a pixel to an index in the array (assumes 4 channel pixels)
 int pixel_index(int x, int y, int image_width) {
-    return (y * image_width + x) * 3;
+    return (y * image_width + x) * 4;
 }
 
-uint8_t* load_texture(char* texture_minecraft_name, int* width, int* height) {
-    int c = 0;
-    char** splits = split(texture_minecraft_name, "/", &c);
-    texture_minecraft_name = splits[1];
-    char* path = cat(TEXTURE_PATH, texture_minecraft_name);
-    
-    int n;
-    uint8_t *data = stbi_load(path, width, height, &n, 4);
-    free(path);
-
-    return data;
-}
 
 void swap(int* a, int* b) {
     int a_i = *a;
@@ -1200,13 +1267,59 @@ void flip(int* a, int flip_value) {
     *a = flip_value + dist;
 }
 
+
+/**
+ * Convert model coordinates to texture coordinates
+ * 
+ * for top faces you'll want to input x and z
+ * 
+ * For side faces you'll do x and y or z and y
+ */
+void model_coor_to_texture_x_y(int c_1, int c_2, int* t_x, int* t_y) {
+    *t_x = c_1;
+    *t_y = c_2;
+}
+
+void model_x_y_z_to_image_x_y(int x, int y, int z, int* image_x, int* image_y) {
+    /*
+
+    slope x = 1/2
+    slope z = -1/2
+
+
+    image_x = 1/2x + 1/2z
+    image_y = -1/4x + 11 + 1/4z - 1/2y
+
+    TESTS:
+    - 15,8,0
+        image_x = 7.5
+        image_y = -7.5 + 11 - 4
+
+    - 0,0,0
+        image_x = 0
+        image_y = 11
+    - 16,0,0
+        image_x = 0
+        image_y = 3
+    - 16,0,16
+        image_x = 16
+        image_y = 11
+    - 0,0,16
+        image_x = 8
+        image_y = 15
+    */
+    
+    *image_x = round(0.5*x + 0.5*z);
+    *image_y = round(-0.25*x + 11 + 0.25*z - 0.5*y);
+}
+
+
 void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
 
     // DETERMINE indices
     int model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
     int model_x_end = cJSON_GetArrayItem(to, 0)->valueint;
-    int model_y_start = cJSON_GetArrayItem(to, 1)->valueint;
-    int model_y_end = model_y_start;
+    int model_y = cJSON_GetArrayItem(to, 1)->valueint;
     int model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
     int model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
 
@@ -1253,21 +1366,73 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
 
     // FOR EACH square walk x y of square on texture converting to image pixels
     int x_step = (model_x_start <= model_x_end)? 1 : -1;
-    int y_step = (model_y_start <= model_y_end)? 1 : -1;
     int z_step = (model_z_start <= model_z_end)? 1 : -1;
 
     for (int x = model_x_start; x != model_x_end; x+=x_step) {
-        for (int y = model_y_start; y != model_y_end; y+=y_step) {
-            for (int z = model_z_start; z != model_z_end; z+=z_step) {
-                
+        for (int z = model_z_start; z != model_z_end; z+=z_step) {
+            if (x == model_x_end) continue;
+            if (z == model_z_end) continue;
+            
+            // convert to image coordinates
+            int image_x, image_y;
+            model_x_y_z_to_image_x_y(x, model_y, z, &image_x, &image_y);
+
+
+            // if pixel set by other coordinates skip
+            int i = pixel_index(image_x, image_y, 16);
+            if (image[i+4] == 0) {
+                printf("x: %d, y: %d\n", image_x, image_y);
+
+                // otherwise set it
+                int tex_x, tex_y;
+                model_coor_to_texture_x_y(x, z, &tex_x, &tex_y);
+                int t = pixel_index(tex_x, tex_y, 16);
+
+                image[i] = top_texture[t];
+                image[i+1] = top_texture[t+1];
+                image[i+2] = top_texture[t+2];
+                image[i+3] = top_texture[t+3];
+                // stbi_write_jpg("test.jpg", 16, 16, 4, image, 96);
             }
+
         }
     }
-
-
-
 }
 
+
+char* get_file_name_from_minecraft_name(char* jar_folder, char* minecraft_name, char* extension) {
+    int c = 0;
+    char** splits = split(minecraft_name, "/", &c);
+    minecraft_name = splits[1];
+    char* path = CAT(jar_folder, minecraft_name, extension, NULL);
+
+    for (int i = 0; i < c; i++) {
+        free(splits[i]);
+    }
+    free(splits);
+
+    return path;
+}
+
+
+uint8_t* load_texture(char* texture_minecraft_name) {
+    char* path = get_file_name_from_minecraft_name(TEXTURE_PATH, texture_minecraft_name, ".png");
+    
+    int width, height, n;
+    uint8_t *data = stbi_load(path, &width, &height, &n, 4);
+    free(path);
+
+    return data;
+}
+
+cJSON* load_block_json(const char* block_minecraft_name) {
+    char* path = get_file_name_from_minecraft_name(BLOCKS_PATH, block_minecraft_name, ".json");
+    char* content = read_file(path);
+    cJSON *json = cJSON_Parse(content);
+    free(path);
+    free(content);
+    return json;
+}
 
 /**
  * Returns pixels (16x16) for a block. 
@@ -1283,7 +1448,7 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
     // render block if not rendered yet
     if (block == NULL) {
         // RENDER BLOCK SHAPE
-        cJSON *json = cJSON_Parse(cat(BLOCKS_PATH, block_minecraft_name));
+        cJSON *json = load_block_json(block_minecraft_name);
 
         // GET TEXTURES
         uint8_t* top_texture; // 16x16x4
@@ -1292,42 +1457,54 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
             cJSON* textures = cJSON_GetObjectItem(json, "textures");
             if (cJSON_HasObjectItem(textures, "all")) {
                 cJSON* all = cJSON_GetObjectItem(textures, "all");
-                top_texture = load_texture(all->valuestring, 16, 16);
+                top_texture = load_texture(all->valuestring);
                 side_texture = top_texture;
             }
             else if (cJSON_HasObjectItem(textures, "wall")) {
                 cJSON* wall = cJSON_GetObjectItem(textures, "wall");
-                top_texture = load_texture(wall->valuestring, 16, 16);
+                top_texture = load_texture(wall->valuestring);
                 side_texture = top_texture;
+            }
+            else {
+                cJSON* top = cJSON_GetObjectItem(textures, "top");
+                cJSON* side = cJSON_GetObjectItem(textures, "top");
+                top_texture = load_texture(top->valuestring);
+                side_texture = load_texture(side->valuestring);
             }
         }
 
 
         // GET OBJECT DIMENSIONS
         cJSON *model_json = json;
-        while (!cJSON_HasObjectItem(model_json, "elements")) {
+        cJSON* elements = cJSON_GetObjectItem(model_json, "elements");
+        while (!elements || !cJSON_IsArray(elements)) {
             if (cJSON_HasObjectItem(model_json, "parent")) {
                 char* parent = cJSON_GetObjectItem(model_json, "parent")->valuestring;
-                int c = 0;
-                char** splits = split(parent, "/", &c);
-                parent = splits[1];
-                char* path = cat(BLOCKS_PATH, parent);
-                model_json = cJSON_Parse(path);
-                free(path);
+                cJSON *model_json = load_block_json(parent);
+                elements = cJSON_GetObjectItem(model_json, "elements");
             }
             else {
                 break;
             }
         }
 
-        uint8_t* pixels_NE[16*16*4] = {0};
-        uint8_t* pixels_SE[16*16*4] = {0};
-        uint8_t* pixels_SW[16*16*4] = {0};
-        uint8_t* pixels_NW[16*16*4] = {0};
+        uint8_t pixels_0[16*16*4] = {0};
+        uint8_t pixels_1[16*16*4] = {0};
+        uint8_t pixels_2[16*16*4] = {0};
+        uint8_t pixels_3[16*16*4] = {0};
+
+        // int i = pixel_index(0,0,16);
+        // pixels_0[i] = 255;
+        // i = pixel_index(0,10,16);
+        // pixels_0[i] = 150;
+        // i = pixel_index(15,0,16);
+        // pixels_0[i] = 255;
+        // i = pixel_index(14,14,16);
+        // pixels_0[i] = 50;
+        // stbi_write_jpg("test.jpg", 16, 16, 4, pixels_0, 96);
 
         int squares[4][3];
-        if (cJSON_HasObjectItem(model_json, "elements")) {
-            cJSON* elements = cJSON_GetObjectItem(model_json, "elements");
+        if (elements) {
             int num_elements = cJSON_GetArraySize(elements);
             
             for (int side = 0; side < 4; side++) {
@@ -1340,6 +1517,9 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
 
 
                     // top square
+                    set_top_square(pixels_0, side, top_texture, from, to);
+
+                    stbi_write_jpg("test.jpg", 16, 16, 4, pixels_0, 96);
                     
 
                     // left square
@@ -1422,8 +1602,9 @@ int main(int argc, char **argv) {
 
     // init rendered block map
     Map* block_tag_to_rendered_blocks = new_map();
+    get_rendered_block("minecraft:block/birch_stairs", block_tag_to_rendered_blocks);
 
-    // init drawn blocks mapp
+    // init drawn blocks map
     Map* xyz_to_drawn_blocks = new_map();
     
     
