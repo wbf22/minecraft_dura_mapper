@@ -1374,8 +1374,9 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
     int x_step = (model_x_start <= model_x_end)? 1 : -1;
     int z_step = (model_z_start <= model_z_end)? 1 : -1;
 
-    for (int x = model_x_start; x != model_x_end+x_step; x+=x_step) {
-        for (int z = model_z_start; z != model_z_end+z_step; z+=z_step) {
+    printf("\n");
+    for (int x = model_x_start; x != model_x_end; x+=x_step) {
+        for (int z = model_z_start; z != model_z_end; z+=z_step) {
             if (x == model_x_end) continue;
             if (z == model_z_end) continue;
             
@@ -1383,10 +1384,13 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
             int image_x, image_y;
             model_x_y_z_to_image_x_y(x, model_y, z, &image_x, &image_y);
 
+            // skip out of bounds stuff
+            if (image_x == 16 || image_y == 16 || image_x == -1 || image_y == -1) continue;
+
 
             // if pixel set by other coordinates skip
             int i = pixel_index(image_x, image_y, 16);
-            if (image[i+4] == 0) {
+            if (image[i] == 0) {
                 printf("x: %d, y: %d\n", image_x, image_y);
 
                 // otherwise set it
@@ -1408,13 +1412,44 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
 void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
 
     // DETERMINE indices
-    int model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
-    int model_x_end = model_x_start;
-    int model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
-    int model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
-    int model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
-    int model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
-
+    int model_x_start;
+    int model_x_end;
+    int model_y_start;
+    int model_y_end;
+    int model_z_start;
+    int model_z_end;
+    if (side == 0) {
+        model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+        model_x_end = model_x_start;
+        model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+        model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+        model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+        model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
+    }
+    else if (side == 1) {
+        model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+        model_x_end = cJSON_GetArrayItem(to, 0)->valueint;
+        model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+        model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+        model_z_start = cJSON_GetArrayItem(to, 2)->valueint;
+        model_z_end = model_z_start;
+    }
+    else if (side == 2) {
+        model_x_start = cJSON_GetArrayItem(to, 0)->valueint;
+        model_x_end = model_x_start;
+        model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+        model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+        model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+        model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
+    }
+    else if (side == 3) {
+        model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+        model_x_end = cJSON_GetArrayItem(to, 0)->valueint;
+        model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+        model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+        model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+        model_z_end = model_z_start;
+    }
     apply_side_rotation(side, &model_x_start, &model_x_end, &model_z_start, &model_z_end);
 
 
@@ -1427,8 +1462,9 @@ void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from
     int model_h_end = (model_x_start == model_x_end)? model_z_end : model_x_end;
     int h_step = (model_x_start == model_x_end)? z_step : x_step;
 
-    for (int y = model_y_start; y != model_y_end+y_step; y+=y_step) {
-        for (int h = model_h_start; h != model_h_end+h_step; h+=h_step) {
+    printf("\n");
+    for (int y = model_y_start; y != model_y_end; y+=y_step) {
+        for (int h = model_h_start; h != model_h_end; h+=h_step) {
             if (h == model_h_end) continue;
             if (y == model_y_end) continue;
             
@@ -1441,10 +1477,13 @@ void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from
                 model_x_y_z_to_image_x_y(h, y, model_z_start, &image_x, &image_y);
             }
 
+            // skip out of bounds stuff
+            if (image_x == 16 || image_y == 16 || image_x == -1 || image_y == -1) continue;
+
 
             // if pixel set by other coordinates skip
             int i = pixel_index(image_x, image_y, 16);
-            if (image[i+4] == 0) {
+            if (image[i] == 0) {
                 printf("x: %d, y: %d\n", image_x, image_y);
 
                 // otherwise set it
@@ -1458,11 +1497,131 @@ void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from
                 image[i+3] = top_texture[t+3];
                 // stbi_write_jpg("test.jpg", 16, 16, 4, image, 96);
             }
-
         }
     }
 }
 
+void set_right_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
+
+    // DETERMINE indices
+    int model_x_start;
+    int model_x_end;
+    int model_y_start;
+    int model_y_end;
+    int model_z_start;
+    int model_z_end;
+    if (side == 0) {
+        model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+        model_x_end = cJSON_GetArrayItem(to, 0)->valueint;
+        model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+        model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+        model_z_start = cJSON_GetArrayItem(to, 2)->valueint;
+        model_z_end = model_z_start;
+    }
+    else if (side == 1) {
+        model_x_start = cJSON_GetArrayItem(to, 0)->valueint;
+        model_x_end = model_x_start;
+        model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+        model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+        model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+        model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
+    }
+    else if (side == 2) {
+        model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+        model_x_end = cJSON_GetArrayItem(to, 0)->valueint;
+        model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+        model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+        model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+        model_z_end = model_z_start;
+    }
+    else if (side == 3) {
+        model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+        model_x_end = model_x_start;
+        model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+        model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+        model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+        model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
+    }
+
+    apply_side_rotation(side, &model_x_start, &model_x_end, &model_z_start, &model_z_end);
+
+
+    // FOR EACH square walk x y of square on texture converting to image pixels
+    int x_step = (model_x_start <= model_x_end)? 1 : -1;
+    int y_step = (model_y_start <= model_y_end)? 1 : -1;
+    int z_step = (model_z_start <= model_z_end)? 1 : -1;
+
+    int model_h_start = (model_x_start == model_x_end)? model_z_start : model_x_start;
+    int model_h_end = (model_x_start == model_x_end)? model_z_end : model_x_end;
+    int h_step = (model_x_start == model_x_end)? z_step : x_step;
+
+    printf("\n");
+    for (int y = model_y_start; y != model_y_end; y+=y_step) {
+        for (int h = model_h_start; h != model_h_end; h+=h_step) {
+            if (h == model_h_end) continue;
+            if (y == model_y_end) continue;
+            
+            // convert to image coordinates
+            int image_x, image_y;
+            if (model_x_start == model_x_end) {
+                model_x_y_z_to_image_x_y(model_x_start, y, h, &image_x, &image_y);
+            }
+            else {
+                model_x_y_z_to_image_x_y(h, y, model_z_start, &image_x, &image_y);
+            }
+
+            // skip out of bounds stuff
+            if (image_x == 16 || image_y == 16 || image_x == -1 || image_y == -1) continue;
+
+
+            // if pixel set by other coordinates skip
+            int i = pixel_index(image_x, image_y, 16);
+            if (image[i] == 0) {
+                printf("x: %d, y: %d\n", image_x, image_y);
+
+                // otherwise set it
+                int tex_x, tex_y;
+                model_coor_to_texture_x_y(h, y, &tex_x, &tex_y);
+                int t = pixel_index(tex_x, tex_y, 16);
+
+                image[i] = top_texture[t];
+                image[i+1] = top_texture[t+1];
+                image[i+2] = top_texture[t+2];
+                image[i+3] = top_texture[t+3];
+                // stbi_write_jpg("test.jpg", 16, 16, 4, image, 96);
+            }
+        }
+    }
+}
+
+void combine_images(uint8_t* result, uint8_t* img_1, uint8_t* img_2, uint8_t* img_3, int size) {
+    for (int x = 0; x < size; x++) {
+        for (int y = 0; y < size; y++) {
+            int i = pixel_index(x, y, size);
+            
+            if (img_1[i] != 0) {
+                result[i] = img_1[i];
+                result[i+1] = img_1[i+1];
+                result[i+2] = img_1[i+2];
+                result[i+3] = img_1[i+3];
+            }
+
+            if (img_2[i] != 0) {
+                result[i] = img_2[i];
+                result[i+1] = img_2[i+1];
+                result[i+2] = img_2[i+2];
+                result[i+3] = img_2[i+3];
+            }
+
+            if (img_3[i] != 0) {
+                result[i] = img_3[i];
+                result[i+1] = img_3[i+1];
+                result[i+2] = img_3[i+2];
+                result[i+3] = img_3[i+3];
+            }
+        }
+    }
+}
 
 
 
@@ -1559,21 +1718,22 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
         uint8_t pixels_2[16*16*4] = {0};
         uint8_t pixels_3[16*16*4] = {0};
 
-        // int i = pixel_index(0,0,16);
-        // pixels_0[i] = 255;
-        // i = pixel_index(0,10,16);
-        // pixels_0[i] = 150;
-        // i = pixel_index(15,0,16);
-        // pixels_0[i] = 255;
-        // i = pixel_index(14,14,16);
-        // pixels_0[i] = 50;
-        // stbi_write_jpg("test.jpg", 16, 16, 4, pixels_0, 96);
-
         int squares[4][3];
         if (elements) {
             int num_elements = cJSON_GetArraySize(elements);
             
             for (int side = 0; side < 4; side++) {
+
+                uint8_t* pixels;
+                if (side == 0) 
+                    pixels = pixels_0;
+                else if (side == 1)
+                    pixels = pixels_1;
+                else if (side == 2)
+                    pixels = pixels_2;
+                else if (side == 3)
+                    pixels = pixels_3;
+
                 for (int i = 0; i < num_elements; i++) {
                     cJSON* element = cJSON_GetArrayItem(elements, i);
 
@@ -1583,16 +1743,24 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
 
 
                     // top square
-                    set_top_square(pixels_0, side, top_texture, from, to);
+                    uint8_t top_pixels[16*16*4] = {0};
+                    set_top_square(top_pixels, side, top_texture, from, to);
+                    stbi_write_jpg("test.jpg", 16, 16, 4, top_pixels, 96);
 
 
                     // left square
-                    set_left_square(pixels_0, side, side_texture, from, to);
-                    stbi_write_jpg("test.jpg", 16, 16, 4, pixels_0, 96);
+                    uint8_t left_pixels[16*16*4] = {0};
+                    set_left_square(left_pixels, side, side_texture, from, to);
+                    stbi_write_jpg("test.jpg", 16, 16, 4, left_pixels, 96);
                     
 
                     // right square
+                    uint8_t right_pixels[16*16*4] = {0};
+                    set_right_square(right_pixels, side, side_texture, from, to);
+                    stbi_write_jpg("test.jpg", 16, 16, 4, right_pixels, 96);
 
+                    combine_images(pixels, top_pixels, left_pixels, right_pixels, 16);
+                    stbi_write_jpg("test.jpg", 16, 16, 4, pixels, 96);
 
                 }
             }
