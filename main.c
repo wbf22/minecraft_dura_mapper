@@ -1254,7 +1254,7 @@ int pixel_index(int x, int y, int image_width) {
     return (y * image_width + x) * 4;
 }
 
-
+// swaps two values
 void swap(int* a, int* b) {
     int a_i = *a;
     int b_i = *b;
@@ -1262,6 +1262,7 @@ void swap(int* a, int* b) {
     *b = a_i;
 }
 
+// get's the value on the oppposite side of the flip value
 void flip(int* a, int flip_value) {
     int dist = flip_value - *a;
     *a = flip_value + dist;
@@ -1314,14 +1315,7 @@ void model_x_y_z_to_image_x_y(int x, int y, int z, int* image_x, int* image_y) {
 }
 
 
-void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
-
-    // DETERMINE indices
-    int model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
-    int model_x_end = cJSON_GetArrayItem(to, 0)->valueint;
-    int model_y = cJSON_GetArrayItem(to, 1)->valueint;
-    int model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
-    int model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
+void apply_side_rotation(int side, int* x_start, int* x_end, int* z_start, int* z_end) {
 
     if (side == 0) {
         // no change
@@ -1332,11 +1326,11 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
         // swap x and z for both
         // flip x for both
         
-        swap(&model_x_start, &model_z_start);
-        swap(&model_x_end, &model_z_end);
+        swap(x_start, z_start);
+        swap(x_end, z_end);
 
-        flip(&model_x_start, 8);
-        flip(&model_x_end, 8);
+        flip(x_start, 8);
+        flip(x_end, 8);
     }
     else if (side == 2) {
         // 8, 8, 0 -> 8, 8, 16
@@ -1344,11 +1338,11 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
         // flip z for both
         // flip x for both 
         
-        flip(&model_z_start, 8);
-        flip(&model_z_end, 8);
+        flip(z_start, 8);
+        flip(z_end, 8);
 
-        flip(&model_x_start, 8);
-        flip(&model_x_end, 8);
+        flip(x_start, 8);
+        flip(x_end, 8);
     }
     else if (side == 3) {
         // 8, 8, 0 -> 0, 8, 8
@@ -1356,20 +1350,32 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
         // swap x and z for both
         // flip z for both
 
-        swap(&model_x_start, &model_z_start);
-        swap(&model_x_end, &model_z_end);
+        swap(x_start, z_start);
+        swap(x_end, z_end);
 
-        flip(&model_z_start, 8);
-        flip(&model_z_end, 8);
+        flip(z_start, 8);
+        flip(z_end, 8);
     }
+}
+
+void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
+
+    // DETERMINE indices
+    int model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+    int model_x_end = cJSON_GetArrayItem(to, 0)->valueint;
+    int model_y = cJSON_GetArrayItem(to, 1)->valueint;
+    int model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+    int model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
+
+    apply_side_rotation(side, &model_x_start, &model_x_end, &model_z_start, &model_z_end);
 
 
     // FOR EACH square walk x y of square on texture converting to image pixels
     int x_step = (model_x_start <= model_x_end)? 1 : -1;
     int z_step = (model_z_start <= model_z_end)? 1 : -1;
 
-    for (int x = model_x_start; x != model_x_end; x+=x_step) {
-        for (int z = model_z_start; z != model_z_end; z+=z_step) {
+    for (int x = model_x_start; x != model_x_end+x_step; x+=x_step) {
+        for (int z = model_z_start; z != model_z_end+z_step; z+=z_step) {
             if (x == model_x_end) continue;
             if (z == model_z_end) continue;
             
@@ -1398,6 +1404,66 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
         }
     }
 }
+
+void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
+
+    // DETERMINE indices
+    int model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
+    int model_x_end = model_x_start;
+    int model_y_start = cJSON_GetArrayItem(from, 1)->valueint;
+    int model_y_end = cJSON_GetArrayItem(to, 1)->valueint;
+    int model_z_start = cJSON_GetArrayItem(from, 2)->valueint;
+    int model_z_end = cJSON_GetArrayItem(to, 2)->valueint;
+
+    apply_side_rotation(side, &model_x_start, &model_x_end, &model_z_start, &model_z_end);
+
+
+    // FOR EACH square walk x y of square on texture converting to image pixels
+    int x_step = (model_x_start <= model_x_end)? 1 : -1;
+    int y_step = (model_y_start <= model_y_end)? 1 : -1;
+    int z_step = (model_z_start <= model_z_end)? 1 : -1;
+
+    int model_h_start = (model_x_start == model_x_end)? model_z_start : model_x_start;
+    int model_h_end = (model_x_start == model_x_end)? model_z_end : model_x_end;
+    int h_step = (model_x_start == model_x_end)? z_step : x_step;
+
+    for (int y = model_y_start; y != model_y_end+y_step; y+=y_step) {
+        for (int h = model_h_start; h != model_h_end+h_step; h+=h_step) {
+            if (h == model_h_end) continue;
+            if (y == model_y_end) continue;
+            
+            // convert to image coordinates
+            int image_x, image_y;
+            if (model_x_start == model_x_end) {
+                model_x_y_z_to_image_x_y(model_x_start, y, h, &image_x, &image_y);
+            }
+            else {
+                model_x_y_z_to_image_x_y(h, y, model_z_start, &image_x, &image_y);
+            }
+
+
+            // if pixel set by other coordinates skip
+            int i = pixel_index(image_x, image_y, 16);
+            if (image[i+4] == 0) {
+                printf("x: %d, y: %d\n", image_x, image_y);
+
+                // otherwise set it
+                int tex_x, tex_y;
+                model_coor_to_texture_x_y(h, y, &tex_x, &tex_y);
+                int t = pixel_index(tex_x, tex_y, 16);
+
+                image[i] = top_texture[t];
+                image[i+1] = top_texture[t+1];
+                image[i+2] = top_texture[t+2];
+                image[i+3] = top_texture[t+3];
+                // stbi_write_jpg("test.jpg", 16, 16, 4, image, 96);
+            }
+
+        }
+    }
+}
+
+
 
 
 char* get_file_name_from_minecraft_name(char* jar_folder, char* minecraft_name, char* extension) {
@@ -1519,10 +1585,11 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
                     // top square
                     set_top_square(pixels_0, side, top_texture, from, to);
 
-                    stbi_write_jpg("test.jpg", 16, 16, 4, pixels_0, 96);
-                    
 
                     // left square
+                    set_left_square(pixels_0, side, side_texture, from, to);
+                    stbi_write_jpg("test.jpg", 16, 16, 4, pixels_0, 96);
+                    
 
                     // right square
 
