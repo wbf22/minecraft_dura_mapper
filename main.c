@@ -1375,6 +1375,8 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
     int z_step = (model_z_start <= model_z_end)? 1 : -1;
 
     printf("\n");
+    model_x_end = model_x_end == 0? -1 : model_x_end;
+    model_z_end = model_z_end == 0? -1 : model_z_end;
     for (int x = model_x_start; x != model_x_end; x+=x_step) {
         for (int z = model_z_start; z != model_z_end; z+=z_step) {
             if (x == model_x_end) continue;
@@ -1463,6 +1465,8 @@ void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from
     int h_step = (model_x_start == model_x_end)? z_step : x_step;
 
     printf("\n");
+    model_y_end = model_y_end == 0? -1 : model_y_end;
+    model_h_end = model_h_end == 0? -1 : model_h_end;
     for (int y = model_y_start; y != model_y_end; y+=y_step) {
         for (int h = model_h_start; h != model_h_end; h+=h_step) {
             if (h == model_h_end) continue;
@@ -1484,7 +1488,7 @@ void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from
             // if pixel set by other coordinates skip
             int i = pixel_index(image_x, image_y, 16);
             if (image[i] == 0) {
-                printf("x: %d, y: %d\n", image_x, image_y);
+                printf("h:%d, m_y:%d;  x: %d, y: %d\n", h, y, image_x, image_y);
 
                 // otherwise set it
                 int tex_x, tex_y;
@@ -1556,6 +1560,8 @@ void set_right_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* fro
     int h_step = (model_x_start == model_x_end)? z_step : x_step;
 
     printf("\n");
+    model_y_end = model_y_end == 0? -1 : model_y_end;
+    model_h_end = model_h_end == 0? -1 : model_h_end;
     for (int y = model_y_start; y != model_y_end; y+=y_step) {
         for (int h = model_h_start; h != model_h_end; h+=h_step) {
             if (h == model_h_end) continue;
@@ -1723,6 +1729,7 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
             int num_elements = cJSON_GetArraySize(elements);
             
             for (int side = 0; side < 4; side++) {
+                // side = 3;
 
                 uint8_t* pixels;
                 if (side == 0) 
