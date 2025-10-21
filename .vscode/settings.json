@@ -19,6 +19,11 @@
         "stb_image_write.h": "c",
         "ios": "c",
         "queue": "c",
-        "stack": "c"
+        "stack": "c",
+        "__node_handle": "c",
+        "deque": "c",
+        "limits": "c",
+        "optional": "c",
+        "ratio": "c"
     }
 }

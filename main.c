@@ -33,6 +33,8 @@ char* RESET = "\033[0m";
 char* RED = "\033[252;3;3m";
 char* YELLOW = "\033[252;186;3m";
 
+#define IMAGE_SIZE 1024
+
 
 // DUMPERS
 
@@ -809,28 +811,21 @@ void free_property(Property* property) {
     free(property->value);
 }
 
-typedef struct {
-    char* name;                   // Full block name, e.g., "minecraft:grass_block"
-    int tint_index;               // -1 if none
-    size_t num_properties;
-    Property* properties;         // Array of properties like "facing=north", "half=top"
-    char* model;                  // Optional reference to a block model JSON
-    char* biome;                  // Optional biome name for color calculations
-} Block;
-
-void free_block(Block* block) {
-    free(block->name);
-    free(block->model);
-    free(block->biome);
-    for(size_t i = 0; i < block->num_properties; ++i) {
-        free_property(&block->properties[i]);
-    }
-}
-
 
 typedef struct {
-    uint8_t pixels[16*16*4]; // 16x16 pixel image representing a block (side view kind of thing)
+    uint8_t* pixels_0; // 16x16 pixel image representing a block (side view kind of thing)
+    uint8_t* pixels_1;
+    uint8_t* pixels_2;
+    uint8_t* pixels_3;
 } RenderedBlock;
+
+void free_rendered_block(RenderedBlock* block) {
+    free(block->pixels_0);
+    free(block->pixels_1);
+    free(block->pixels_2);
+    free(block->pixels_3);
+    free(block);
+}
 
 
 
@@ -1078,7 +1073,7 @@ int compare_mca_paths(const void *a, const void *b) {
 
         long long dist_first = llabs(max_coor - first_x) + llabs(max_coor - first_z);
         long long dist_second = llabs(max_coor - second_x) + llabs(max_coor - second_z);
-        return dist_first - dist_second;
+        return dist_second - dist_first;
     }
     else if (strcmp(ANGLE, "SE") == 0) {  // + -
         long long max_x = MAX(first_x, second_x);
@@ -1087,7 +1082,7 @@ int compare_mca_paths(const void *a, const void *b) {
 
         long long dist_first = llabs(max_coor - first_x) + llabs(-max_coor - first_z);
         long long dist_second = llabs(max_coor - second_x) + llabs(-max_coor - second_z);
-        return dist_first - dist_second;
+        return dist_second - dist_first;
     }
     else if (strcmp(ANGLE, "SW") == 0) {  // - -
         long long min_x = MIN(first_x, second_x);
@@ -1096,7 +1091,7 @@ int compare_mca_paths(const void *a, const void *b) {
 
         long long dist_first = llabs(min_coor - first_x) + llabs(min_coor - first_z);
         long long dist_second = llabs(min_coor - second_x) + llabs(min_coor - second_z);
-        return dist_first - dist_second;
+        return dist_second - dist_first;
 
     }
     else if (strcmp(ANGLE, "NW") == 0) {  // - +
@@ -1106,7 +1101,7 @@ int compare_mca_paths(const void *a, const void *b) {
 
         long long dist_first = llabs(-max_coor - first_x) + llabs(max_coor - first_z);
         long long dist_second = llabs(-max_coor - second_x) + llabs(max_coor - second_z);
-        return dist_first - dist_second;
+        return dist_second - dist_first;
     }
     else {
         printf("'%s' isn't a valid angle.\n", ANGLE);
@@ -1240,7 +1235,7 @@ void find_block_models() {
             printf("%s\n", dirs[i]);
             BLOCKS_PATH = cat(dirs[i], "/");
         }
-        else if (ends_with(dirs[i], "textures/block")) {
+        else if (ends_with(dirs[i], "textures")) {
             printf("%s\n", dirs[i]);
             TEXTURE_PATH = cat(dirs[i], "/");
         }
@@ -1279,6 +1274,9 @@ void flip(int* a, int flip_value) {
 void model_coor_to_texture_x_y(int c_1, int c_2, int* t_x, int* t_y) {
     *t_x = c_1;
     *t_y = c_2;
+
+    flip(t_x, 7);
+    flip(t_y, 7);
 }
 
 void model_x_y_z_to_image_x_y(int x, int y, int z, int* image_x, int* image_y) {
@@ -1633,7 +1631,7 @@ void combine_images(uint8_t* result, uint8_t* img_1, uint8_t* img_2, uint8_t* im
 
 char* get_file_name_from_minecraft_name(char* jar_folder, char* minecraft_name, char* extension) {
     int c = 0;
-    char** splits = split(minecraft_name, "/", &c);
+    char** splits = split(minecraft_name, ":", &c);
     minecraft_name = splits[1];
     char* path = CAT(jar_folder, minecraft_name, extension, NULL);
 
@@ -1647,7 +1645,7 @@ char* get_file_name_from_minecraft_name(char* jar_folder, char* minecraft_name, 
 
 
 uint8_t* load_texture(char* texture_minecraft_name) {
-    char* path = get_file_name_from_minecraft_name(TEXTURE_PATH, texture_minecraft_name, ".png");
+    char* path = CAT(TEXTURE_PATH, texture_minecraft_name, ".png", NULL);
     
     int width, height, n;
     uint8_t *data = stbi_load(path, &width, &height, &n, 4);
@@ -1702,6 +1700,13 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
                 top_texture = load_texture(top->valuestring);
                 side_texture = load_texture(side->valuestring);
             }
+
+            // get top, side, and bottom textures
+            if (cJSON_HasObjectItem(textures, "side")) {
+                cJSON* side = cJSON_GetObjectItem(textures, "side");
+                side_texture = load_texture(side->valuestring);
+
+            }
         }
 
 
@@ -1719,27 +1724,28 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
             }
         }
 
-        uint8_t pixels_0[16*16*4] = {0};
-        uint8_t pixels_1[16*16*4] = {0};
-        uint8_t pixels_2[16*16*4] = {0};
-        uint8_t pixels_3[16*16*4] = {0};
+        block = malloc(sizeof(RenderedBlock));
+        block->pixels_0 = (uint8_t *)calloc(16*16*4, sizeof(uint8_t));
+        block->pixels_1 = (uint8_t *)calloc(16*16*4, sizeof(uint8_t));
+        block->pixels_2 = (uint8_t *)calloc(16*16*4, sizeof(uint8_t));
+        block->pixels_3 = (uint8_t *)calloc(16*16*4, sizeof(uint8_t));
 
         int squares[4][3];
+        // RENDER each orientation
         if (elements) {
             int num_elements = cJSON_GetArraySize(elements);
-            
             for (int side = 0; side < 4; side++) {
                 // side = 3;
 
                 uint8_t* pixels;
                 if (side == 0) 
-                    pixels = pixels_0;
+                    pixels = block->pixels_0;
                 else if (side == 1)
-                    pixels = pixels_1;
+                    pixels = block->pixels_1;
                 else if (side == 2)
-                    pixels = pixels_2;
+                    pixels = block->pixels_2;
                 else if (side == 3)
-                    pixels = pixels_3;
+                    pixels = block->pixels_3;
 
                 for (int i = 0; i < num_elements; i++) {
                     cJSON* element = cJSON_GetArrayItem(elements, i);
@@ -1774,20 +1780,320 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
         }
         else {
             printf("%sCouldn't find block model for '%s' so we'll just use the default block for that one.%s\n", YELLOW, block_minecraft_name, RESET);
-
+            // XXX: actually do that here
         }
         cJSON_free(json);
 
-        // render each orientation
 
 
-        // GET TEXTURE
 
-        // GENERATE IMAGE
+
     }
 
 
     return block;
+}
+
+void block_x_y_z_to_render_x_y_z(int x, int y, int z, int* image_x, int* image_y) {
+
+    if (strcmp(ANGLE, "NE") == 0) {
+        *image_x = round(-8*x + 8*z);
+        *image_y = round(4*x +4*z + -8*y);
+    }
+    else if (strcmp(ANGLE, "SE") == 0) {
+        *image_x = round(8*x + 8*z);
+        *image_y = round(4*x + -4*z + -8*y);
+    }
+    else if (strcmp(ANGLE, "SW") == 0) {
+        *image_x = round(8*x + -8*z);
+        *image_y = round(-4*x + -4*z + -8*y);
+    }
+    else if (strcmp(ANGLE, "NW") == 0) {
+        *image_x = round(-8*x + -8*z);
+        *image_y = round(-4*x + 4*z + -8*y);
+    }
+    else {
+        printf("'%s' isn't a valid angle.\n", ANGLE);
+        exit(-1);
+    }
+}
+
+
+typedef struct {
+    int x;
+    int z;
+} Coord;
+int compare_coords(const void *a, const void *b) {
+    const Coord* first = (Coord*)a;
+    const Coord* second = (Coord*)b;
+
+    if (strcmp(ANGLE, "NE") == 0) { // + +
+        long long max_x = MAX(first->x, second->x);
+        long long max_z = MAX(first->z, second->z);
+        long long max_coor = MAX(max_x, max_z);
+
+        long long dist_first = llabs(max_coor - first->x) + llabs(max_coor - first->z);
+        long long dist_second = llabs(max_coor - second->x) + llabs(max_coor - second->z);
+        return dist_second - dist_first;
+    }
+    else if (strcmp(ANGLE, "SE") == 0) {  // + -
+        long long max_x = MAX(first->x, second->x);
+        long long min_z = MIN(first->z, second->z);
+        long long max_coor = MAX(llabs(max_x), llabs(min_z));
+
+        long long dist_first = llabs(max_coor - first->x) + llabs(-max_coor - first->z);
+        long long dist_second = llabs(max_coor - second->x) + llabs(-max_coor - second->z);
+        return dist_second - dist_first;
+    }
+    else if (strcmp(ANGLE, "SW") == 0) {  // - -
+        long long min_x = MIN(first->x, second->x);
+        long long min_z = MIN(first->z, second->z);
+        long long min_coor = MIN(min_x, min_z);
+
+        long long dist_first = llabs(min_coor - first->x) + llabs(min_coor - first->z);
+        long long dist_second = llabs(min_coor - second->x) + llabs(min_coor - second->z);
+        return dist_second - dist_first;
+
+    }
+    else if (strcmp(ANGLE, "NW") == 0) {  // - +
+        long long min_x = MIN(first->x, second->x);
+        long long max_z = MAX(first->z, second->z);
+        long long max_coor = MAX(llabs(min_x), llabs(max_z));
+
+        long long dist_first = llabs(-max_coor - first->x) + llabs(max_coor - first->z);
+        long long dist_second = llabs(-max_coor - second->x) + llabs(max_coor - second->z);
+        return dist_second - dist_first;
+    }
+    else {
+        printf("'%s' isn't a valid angle.\n", ANGLE);
+        exit(-1);
+    }
+}
+
+void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks) {
+
+    if (mkdir("dump", 0755) == 0) {
+        printf("Directory created: %s\n", "dump");
+    }
+
+    long long region_x, region_z;
+    extract_mca_region_coordinates(region_file_path, &region_x, &region_z);
+
+    FILE *fp = fopen(region_file_path, "rb");
+    if (!fp) { perror("fopen"); return; }
+
+    // Read offsets table
+    uint8_t offsets[1024*4];
+    fread(offsets, 1, sizeof(offsets), fp);
+
+    // Iterate over chunks
+    for (int cz = 0; cz < 32; cz++) {
+        for (int cx = 0; cx < 32; cx++) {
+            int index = cx + cz * 32;  // index into offsets table
+            int sector_offset = ((offsets[index*4] << 16) | (offsets[index*4+1] << 8) | offsets[index*4+2]);
+            int sectors = offsets[index*4 + 3];
+
+            if (sector_offset == 0) { 
+                // printf("Chunk not generated\n"); 
+                continue;
+            }
+
+            fseek(fp, sector_offset * 4096, SEEK_SET);
+
+            // Read chunk length and compression type
+            uint32_t length;
+            fread(&length, 4, 1, fp);
+            uint8_t compression_type;
+            fread(&compression_type, 1, 1, fp);
+
+            uint8_t *compressed = malloc(length - 1);
+            fread(compressed, 1, length - 1, fp);
+
+            // Decompress with zlib
+            uLongf uncompressed_size = 128*1024; // Adjust if needed
+            uint8_t *nbt_data = malloc(uncompressed_size);
+            int res = uncompress(nbt_data, &uncompressed_size, compressed, length - 1);
+            if (res != Z_OK) { fprintf(stderr, "Decompression failed: %d\n", res); return; }
+
+            // Parse NBT
+            nbt_mem_reader_t reader = { nbt_data, uncompressed_size, 0 };
+            nbt_reader_t nbt_reader = { nbt_read_mem, &reader };
+            nbt_tag_t *chunk_tag = nbt_parse(nbt_reader, NBT_PARSE_FLAG_USE_RAW);
+            if (!chunk_tag) { fprintf(stderr, "NBT parse failed\n"); return; }
+
+
+            nbt_tag_t *sections = nbt_tag_compound_get(chunk_tag, "sections");
+            if (!sections) {
+                fprintf(stderr, "No sections found!\n");
+                return;
+            }
+
+            // get chunk coordinates
+            nbt_tag_t *xPosTag = nbt_tag_compound_get(chunk_tag, "xPos");
+            nbt_tag_t *zPosTag = nbt_tag_compound_get(chunk_tag, "zPos");
+            int chunk_x = xPosTag->tag_int.value * 16;
+            int chunk_z = zPosTag->tag_int.value * 16;
+
+            // ITERATE over sections of chunk to find the surface blocks
+            typedef struct {
+                char *block_type;
+                
+                // roations
+                char* axis; // logs/quartz piller
+                char* facing; // stairs and doors direction NESW
+                char* half; // stairs top or bottom
+                char* shape; // stair modifiers
+                char* type; // slab top or bottom
+                char* rotation; // 0-3 rotation for other blocks
+            } Block;
+            Map* x_z_to_top_blocks = new_map();
+            for (size_t i = 0; i < sections->tag_list.size; ++i) {
+                nbt_tag_t *section = nbt_tag_list_get(sections, i);
+
+                nbt_tag_t *biomes = nbt_tag_compound_get(section, "biomes");
+                nbt_tag_t *biomes_palette = nbt_tag_compound_get(biomes, "palette");
+
+                nbt_tag_t *bs = nbt_tag_compound_get(section, "block_states");
+                nbt_tag_t *palette = nbt_tag_compound_get(bs, "palette");
+                nbt_tag_t *data = nbt_tag_compound_get(bs, "data");
+
+                int section_i = nbt_tag_compound_get(section, "Y")->tag_byte.value;
+                int section_y = section_i * 16;
+
+                if (bs) {
+                    nbt_tag_t *palette = nbt_tag_compound_get(bs, "palette");
+                    nbt_tag_t *data = nbt_tag_compound_get(bs, "data");
+
+                    if (data) {
+                        uint8_t blocks[16][16][16];
+                        decode_block_states(data->tag_long_array.value, data->tag_long_array.size, palette->tag_list.size, blocks);
+
+                        for (size_t y = 0; y < 16; y++) {
+                            for (size_t z = 0; z < 16; z++) {
+                                for (size_t x = 0; x < 16; x++) {
+
+                                    // get block type from palette
+                                    uint8_t idx = blocks[x][y][z];
+                                    nbt_tag_t *block_tag = nbt_tag_list_get(palette, idx);
+                                    nbt_tag_t *name_tag = block_tag ? nbt_tag_compound_get(block_tag, "Name") : NULL;
+                                    const char *type = name_tag ? name_tag->tag_string.value : "unknown";
+                                    if (strcmp(type,  "minecraft:air") != 0) {
+
+                                        int block_x = chunk_x + x;
+                                        int block_y = section_y + y;
+                                        int block_z = chunk_z + z;
+
+                                        // make block
+                                        char tag[256];
+                                        sprintf(tag, "%d %d", block_x, block_z);
+                                        Block* block = malloc(sizeof(Block));
+                                        block->block_type = strdup(type);
+
+                                        // get rotation
+                                        nbt_tag_t *properties = block_tag ? nbt_tag_compound_get(block_tag, "Properties") : NULL;
+                                        if (properties) {
+
+                                            // Example: get 'axis' property (logs, pillars)
+                                            nbt_tag_t *axis_tag = nbt_tag_compound_get(properties, "axis");
+                                            if (axis_tag && axis_tag->type == NBT_TYPE_STRING) {
+                                                const char *axis = axis_tag->tag_string.value;
+                                                block->axis = strdup(axis);
+                                            }
+
+                                            // Example: get 'facing' property
+                                            nbt_tag_t *facing_tag = nbt_tag_compound_get(properties, "facing");
+                                            if (facing_tag && facing_tag->type == NBT_TYPE_STRING) {
+                                                const char *facing = facing_tag->tag_string.value;
+                                                block->facing = strdup(facing);
+                                            }
+
+                                            // Example: get 'half' property
+                                            nbt_tag_t *half_tag = nbt_tag_compound_get(properties, "half");
+                                            if (half_tag && half_tag->type == NBT_TYPE_STRING) {
+                                                const char *half = half_tag->tag_string.value;
+                                                block->half = strdup(half);
+                                            }
+
+                                            // Example: get 'shape' property
+                                            nbt_tag_t *shape_tag = nbt_tag_compound_get(properties, "shape");
+                                            if (shape_tag && shape_tag->type == NBT_TYPE_STRING) {
+                                                const char *shape = shape_tag->tag_string.value;
+                                                block->shape = strdup(shape);
+                                            }
+
+                                            // Example: get 'type' property
+                                            nbt_tag_t *type_tag = nbt_tag_compound_get(properties, "type");
+                                            if (type_tag && type_tag->type == NBT_TYPE_STRING) {
+                                                const char *type = type_tag->tag_string.value;
+                                                block->type = strdup(type);
+                                            }
+
+                                            // Example: get 'rotation' property
+                                            nbt_tag_t *rotation_tag = nbt_tag_compound_get(properties, "rotation");
+                                            if (rotation_tag && rotation_tag->type == NBT_TYPE_STRING) {
+                                                const char *rotation = rotation_tag->tag_string.value;
+                                                block->rotation = strdup(rotation);
+                                            }
+
+                                        }
+
+
+                                        // store in map
+                                        insert(x_z_to_top_blocks, tag, block, sizeof(Block*));
+                                    }
+                                    // printf("x: %d, y: %d, z: %d;  %s    ", x, y, z, name);
+                                }
+                                // printf("\n");
+                            }
+                            // printf("\n\n");
+                        }
+
+                    }
+                }
+
+            }
+
+
+            // RENDER TOP blocks, fartheset from viewer first
+            int s_blocks = 16*16;
+            Coord coordinates[s_blocks];
+            for (size_t z = 0; z < 16; z++) {
+                for (size_t x = 0; x < 16; x++) {
+
+                    int block_x = chunk_x + x;
+                    int block_z = chunk_z + z;
+                    coordinates[z*16 + x].x = block_x;
+                    coordinates[z*16 + x].z = block_z;
+                }
+            }
+            qsort(coordinates, s_blocks, sizeof(Coord), compare_coords);
+            for (int i = 0; i < s_blocks; i++) {
+                
+                // get block
+                Coord bl_c = coordinates[i];
+                char tag[256];
+                sprintf(tag, "%d %d", bl_c.x, bl_c.z);
+                Block* block = at(x_z_to_top_blocks, tag);
+
+                // get rendered block
+                RenderedBlock* render = get_rendered_block(block->block_type, block_tag_to_rendered_blocks);
+                
+                printf("yay\n");
+
+                // determine image coordinates
+
+                // add to image
+                
+            }
+
+            nbt_free_tag(chunk_tag);
+            free(nbt_data);
+            free(compressed);
+        }
+    }
+
+
+    fclose(fp);
 }
 
 
@@ -1836,20 +2142,14 @@ int main(int argc, char **argv) {
     };
     parse_args(argc, argv, options, len(options));
 
+    if (angle != NULL) {
+        ANGLE = angle;
+    }
 
     // extract minecraft jar and set paths to model files
     extract_jar(jar_path, "dump/jar");
     find_block_models();
 
-
-    // init rendered block map
-    Map* block_tag_to_rendered_blocks = new_map();
-    get_rendered_block("minecraft:block/birch_stairs", block_tag_to_rendered_blocks);
-
-    // init drawn blocks map
-    Map* xyz_to_drawn_blocks = new_map();
-    
-    
 
 
     // COLLECT MCA FILES
@@ -1858,21 +2158,31 @@ int main(int argc, char **argv) {
     char **files = collect_files(region_folder, &n);
     
 
-    // SORT MCA FILES TO RENDER CLOSER TO VIEWER FIRST
+    // SORT MCA FILES TO RENDER FARTHER FROM VIEWER FIRST
     qsort(files, n, sizeof(char*), compare_mca_paths);
     
+
+    // init rendered block map
+    Map* block_tag_to_rendered_blocks = new_map();
+    // get_rendered_block("minecraft:block/birch_stairs", block_tag_to_rendered_blocks);
+
+
+    /*
+        RENDER MCAS
+    */
     for (int i = 0; i < n; i++) {
         printf("  %s\n", files[i]);
+
+        // print_region_to_file(files[i], "region.txt");
+        render_mca(files[i], block_tag_to_rendered_blocks);
+
         free(files[i]);
     }
     free(files);
     free(region_folder);
 
-    /*
-        RENDER MCAS
-    */
 
-    // START AT CLOSEST TO VIEWPOINT, AND ONLY RENDER BLOCKS THAT WON'T BE COVERED UP
+    // START AT FARTHEST FROM VIEWPOINT
     /*
         add more image files as needed
         - images should be 
