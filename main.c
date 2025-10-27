@@ -567,10 +567,11 @@ void push(void** array, void* element, long array_length, long* last_index) {
     *last_index++;
 }
 
-void free_array_of_pointers(void** array) {
-    if (array[0] != NULL) {
-
+void free_array(void** array, int len) {
+    for (int i = 0; i < len; ++i) {
+        free(array[i]);
     }
+    free(array);
 }
 
 void resize_if_needed(void*** array, int new_size, int *capacity, size_t element_size) {
@@ -621,6 +622,11 @@ int bcat(char* buffer, long* buffer_len, char* str2) {
 
 
 
+/**
+ * Combines the n strings. creating a new string. No input strings are freed.
+ * 
+ * The last input should be 'NULL' so the function knows the last input
+ */
 char* CAT(char* str, ...) {
     
     
@@ -691,6 +697,8 @@ int ends_with(const char *str, const char *suffix) {
 
 /**
  * Splits a string returned the amount of splits created in 'count'
+ * 
+ * Each string returned will need to be freed
  */
 char** split(char* str, char* delim, int* count) {
     // copy strings since literals can't be processed by strtok
@@ -1226,6 +1234,7 @@ char **collect_folders(const char *path, int *out_count) {
 
 char* BLOCKS_PATH = "dump/jar/assets/minecraft/models/block/";
 char* TEXTURE_PATH = "dump/jar/assets/minecraft/textures/";
+char* BIOME_PATH = "dump/jar/data/minecraft/worldgen/biome";
 void find_block_models() {
 
     int count;
@@ -1263,6 +1272,75 @@ void flip(int* a, int flip_value) {
     *a = flip_value + dist;
 }
 
+
+typedef struct {
+    char* name;
+    
+    double temperature;
+    double downfall;
+
+    int grass_color;
+    int foliage_color;
+    int water_color;
+
+} Biome;
+
+Map* load_biomes() {
+    Map* biome_name_to_biome_data = new_map();
+
+    int count;
+    char** biome_files = collect_files(BIOME_PATH, &count);
+    for (int i = 0; i < count; i++) {
+        char* content = read_file(biome_files[i]);
+        cJSON *json = cJSON_Parse(content);
+
+        cJSON *downfall = cJSON_GetObjectItem(json, "downfall");
+        cJSON *temperature = cJSON_GetObjectItem(json, "temperature");
+
+        cJSON *effects = cJSON_GetObjectItem(json, "effects");
+        cJSON *grass_color = cJSON_GetObjectItem(effects, "grass_color");
+        cJSON *foliage_color = cJSON_GetObjectItem(effects, "foliage_color");
+        cJSON *water_color = cJSON_GetObjectItem(effects, "water_color");
+
+
+        Biome* biome = malloc(sizeof(Biome));
+        biome->downfall = downfall? downfall->valuedouble : -1;
+        biome->temperature = downfall? temperature->valuedouble : -1;
+        biome->grass_color = grass_color? grass_color->valueint : -1;
+        biome->foliage_color = foliage_color? foliage_color->valueint : -1;
+        biome->water_color = water_color? water_color->valueint : -1;
+
+        int n = 0;
+        char** splits = split(biome_files[i], "/", &n);
+        char* file_name = strdup(splits[n-1]);
+        free_array(splits, n);
+        splits = split(file_name, ".", &n);
+        file_name = cat("minecraft:", splits[0]);
+        free_array(splits, n);
+        biome->name = file_name;
+
+        m_put(biome_name_to_biome_data, file_name, biome, sizeof(Biome));
+
+
+
+        free(biome_files[i]);
+        free(content);
+        cJSON_free(json);
+
+    }
+    free(biome_files);
+    
+
+    return biome_name_to_biome_data;
+
+}
+
+typedef struct {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t a;
+} Pixel;
 
 /**
  * Convert model coordinates to texture coordinates
@@ -1356,7 +1434,11 @@ void apply_side_rotation(int side, int* x_start, int* x_end, int* z_start, int* 
     }
 }
 
-void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
+int is_grayscale(uint8_t r, uint8_t g, uint8_t b) {
+    return r == g && g == b;
+}
+
+void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to, Pixel* tint) {
 
     // DETERMINE indices
     int model_x_start = cJSON_GetArrayItem(from, 0)->valueint;
@@ -1402,6 +1484,14 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
                 image[i+1] = top_texture[t+1];
                 image[i+2] = top_texture[t+2];
                 image[i+3] = top_texture[t+3];
+                // printf("%d\n", top_texture[t+3]);
+
+                // apply tint if applicable
+                if (is_grayscale(image[i], image[i+1], image[i+2])) {
+                    image[i] = (image[i] * tint->r) / 255;
+                    image[i+1] = (image[i+1] * tint->g) / 255;
+                    image[i+2] = (image[i+2] * tint->b) / 255;
+                }
                 // stbi_write_jpg("test.jpg", 16, 16, 4, image, 96);
             }
 
@@ -1409,7 +1499,7 @@ void set_top_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from,
     }
 }
 
-void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
+void set_left_square(uint8_t* image, int side, uint8_t* side_texture, uint8_t* overlay_texture, cJSON* from, cJSON* to, Pixel* tint) {
 
     // DETERMINE indices
     int model_x_start;
@@ -1493,17 +1583,33 @@ void set_left_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from
                 model_coor_to_texture_x_y(h, y, &tex_x, &tex_y);
                 int t = pixel_index(tex_x, tex_y, 16);
 
-                image[i] = top_texture[t];
-                image[i+1] = top_texture[t+1];
-                image[i+2] = top_texture[t+2];
-                image[i+3] = top_texture[t+3];
+                image[i] = side_texture[t];
+                image[i+1] = side_texture[t+1];
+                image[i+2] = side_texture[t+2];
+                image[i+3] = side_texture[t+3];
                 // stbi_write_jpg("test.jpg", 16, 16, 4, image, 96);
+
+                if (overlay_texture != NULL) {
+                    if (overlay_texture[t+3] > 0) {
+                        image[i] = overlay_texture[t];
+                        image[i+1] = overlay_texture[t+1];
+                        image[i+2] = overlay_texture[t+2];
+                        image[i+3] = overlay_texture[t+3];
+                    }
+                }
+                
+                // apply tint if applicable
+                if (is_grayscale(image[i], image[i+1], image[i+2])) {
+                    image[i] = (image[i] * tint->r) / 255;
+                    image[i+1] = (image[i+1] * tint->g) / 255;
+                    image[i+2] = (image[i+2] * tint->b) / 255;
+                }
             }
         }
     }
 }
 
-void set_right_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* from, cJSON* to) {
+void set_right_square(uint8_t* image, int side, uint8_t* side_texture, uint8_t* overlay_texture, cJSON* from, cJSON* to, Pixel* tint) {
 
     // DETERMINE indices
     int model_x_start;
@@ -1588,10 +1694,26 @@ void set_right_square(uint8_t* image, int side, uint8_t* top_texture, cJSON* fro
                 model_coor_to_texture_x_y(h, y, &tex_x, &tex_y);
                 int t = pixel_index(tex_x, tex_y, 16);
 
-                image[i] = top_texture[t];
-                image[i+1] = top_texture[t+1];
-                image[i+2] = top_texture[t+2];
-                image[i+3] = top_texture[t+3];
+                image[i] = side_texture[t];
+                image[i+1] = side_texture[t+1];
+                image[i+2] = side_texture[t+2];
+                image[i+3] = side_texture[t+3];
+
+                if (overlay_texture != NULL) {
+                    if (overlay_texture[t+3] > 0) {
+                        image[i] = overlay_texture[t];
+                        image[i+1] = overlay_texture[t+1];
+                        image[i+2] = overlay_texture[t+2];
+                        image[i+3] = overlay_texture[t+3];
+                    }
+                }
+
+                // apply tint if applicable
+                if (is_grayscale(image[i], image[i+1], image[i+2])) {
+                    image[i] = (image[i] * tint->r) / 255;
+                    image[i+1] = (image[i+1] * tint->g) / 255;
+                    image[i+2] = (image[i+2] * tint->b) / 255;
+                }
                 // stbi_write_jpg("test.jpg", 16, 16, 4, image, 96);
             }
         }
@@ -1663,6 +1785,97 @@ cJSON* load_block_json(const char* block_minecraft_name) {
     return json;
 }
 
+int is_grass_or_tall_grass(char* block_minecraft_name) {
+    return strstr(block_minecraft_name, "grass") != NULL;
+}
+
+int is_leaves(char* block_minecraft_name) {
+    return strstr(block_minecraft_name, "leaves") != NULL;
+}
+
+
+Pixel* get_tint(cJSON* element, char* block_minecraft_name, Map* biome_name_to_biome_data, char* biome_name) {
+    Pixel* tint = malloc(sizeof(Pixel));
+    tint->r = 255;
+    tint->g = 255;
+    tint->b = 255;
+    tint->a = 255;
+    int tint_index = 0;
+    cJSON* faces = cJSON_GetObjectItem(element, "faces");
+    if (faces != NULL) {
+        cJSON* north = cJSON_GetObjectItem(faces, "north");
+        if (cJSON_HasObjectItem(north, "tint_index")) {
+            tint_index = cJSON_GetObjectItem(north, "tintindex")->valueint;
+        }
+        cJSON* south = cJSON_GetObjectItem(faces, "south");
+        if (cJSON_HasObjectItem(south, "tint_index")) {
+            tint_index = cJSON_GetObjectItem(south, "tintindex")->valueint;
+        }
+        cJSON* west = cJSON_GetObjectItem(faces, "west");
+        if (cJSON_HasObjectItem(west, "tint_index")) {
+            tint_index = cJSON_GetObjectItem(west, "tintindex")->valueint;
+        }
+        cJSON* east = cJSON_GetObjectItem(faces, "east");
+        if (cJSON_HasObjectItem(east, "tint_index")) {
+            tint_index = cJSON_GetObjectItem(east, "tintindex")->valueint;
+        }
+        cJSON* up = cJSON_GetObjectItem(faces, "up");
+        if (cJSON_HasObjectItem(up, "tint_index")) {
+            tint_index = cJSON_GetObjectItem(up, "tintindex")->valueint;
+        }
+        cJSON* down = cJSON_GetObjectItem(faces, "down");
+        if (cJSON_HasObjectItem(down, "tint_index")) {
+            tint_index = cJSON_GetObjectItem(down, "tintindex")->valueint;
+        }
+    }
+
+    Biome* biome = m_get(biome_name_to_biome_data, biome_name);
+    int x = (int)(biome->temperature * 255);
+    int y = (int)(biome->downfall * 255);
+
+    if (is_grass_or_tall_grass(block_minecraft_name)) {
+        // color = get_pixel(grass_png, x, y);
+        char* path = CAT(TEXTURE_PATH, "colormap/", "grass.png", NULL);
+        int width, height, n;
+        uint8_t *data = stbi_load(path, &width, &height, &n, 4);
+        // stbi_write_jpg("test.jpg", width, height, 4, data, 96);
+        int index = x * 4 + y * width * 4;
+        tint->r = data[index];
+        tint->g = data[index+1];
+        tint->b = data[index+2];
+        tint->a = data[index+3];
+        free(path);
+        free(data);
+    }
+    else if (is_leaves(block_minecraft_name)) {
+        char* path = CAT(TEXTURE_PATH, "colormap/", "foliage.png", NULL);
+        int width, height, n;
+        uint8_t *data = stbi_load(path, &width, &height, &n, 4);
+        int index = x + y * height;
+        tint->r = data[index];
+        tint->g = data[index+1];
+        tint->b = data[index+2];
+        tint->a = data[index+3];
+        free(path);
+        free(data);
+    }
+    else if (biome->downfall == 0){
+        char* path = CAT(TEXTURE_PATH, "colormap/", "dry_foliage.png", NULL);
+        int width, height, n;
+        uint8_t *data = stbi_load(path, &width, &height, &n, 4);
+        int index = x + y * height;
+        tint->r = data[index];
+        tint->g = data[index+1];
+        tint->b = data[index+2];
+        tint->a = data[index+3];
+        free(path);
+        free(data);
+    }
+        
+
+    return tint;
+}
+
 /**
  * Returns pixels (16x16) for a block. 
  * 
@@ -1670,18 +1883,23 @@ cJSON* load_block_json(const char* block_minecraft_name) {
  * 
  * The block_minecraft_name should be provided like 'minecraft:block/stairs'
  */
-RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_blocks) {
+RenderedBlock* get_rendered_block(char* block_minecraft_name, char* biome_name, Map* rendered_blocks, Map* biome_name_to_biome_data) {
 
-    RenderedBlock* block = at(rendered_blocks, block_minecraft_name);
+    char* block_name_with_biome = CAT(block_minecraft_name, " ", biome_name, NULL);
+    RenderedBlock* block = m_get(rendered_blocks, block_name_with_biome);
     
     // render block if not rendered yet
     if (block == NULL) {
+
+        block == malloc(sizeof(RenderedBlock));
+
         // RENDER BLOCK SHAPE
         cJSON *json = load_block_json(block_minecraft_name);
 
         // GET TEXTURES
-        uint8_t* top_texture; // 16x16x4
-        uint8_t* side_texture; // 16x16x4
+        uint8_t* top_texture = NULL; // 16x16x4
+        uint8_t* side_texture = NULL; // 16x16x4
+        uint8_t* overlay_texture = NULL; // 16x16x4
         if (cJSON_HasObjectItem(json, "textures")) {
             cJSON* textures = cJSON_GetObjectItem(json, "textures");
             if (cJSON_HasObjectItem(textures, "all")) {
@@ -1705,7 +1923,10 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
             if (cJSON_HasObjectItem(textures, "side")) {
                 cJSON* side = cJSON_GetObjectItem(textures, "side");
                 side_texture = load_texture(side->valuestring);
-
+            }
+            if (cJSON_HasObjectItem(textures, "overlay")) {
+                cJSON* overlay = cJSON_GetObjectItem(textures, "overlay");
+                overlay_texture = load_texture(overlay->valuestring);
             }
         }
 
@@ -1755,21 +1976,25 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
                     cJSON* to = cJSON_GetObjectItem(element, "to");
 
 
+                    // TINT INDEX if applicable
+                    Pixel* tint = get_tint(element, block_minecraft_name, biome_name_to_biome_data, biome_name);
+                    
+
                     // top square
                     uint8_t top_pixels[16*16*4] = {0};
-                    set_top_square(top_pixels, side, top_texture, from, to);
+                    set_top_square(top_pixels, side, top_texture, from, to, tint);
                     stbi_write_jpg("test.jpg", 16, 16, 4, top_pixels, 96);
 
 
                     // left square
                     uint8_t left_pixels[16*16*4] = {0};
-                    set_left_square(left_pixels, side, side_texture, from, to);
+                    set_left_square(left_pixels, side, side_texture, overlay_texture, from, to, tint);
                     stbi_write_jpg("test.jpg", 16, 16, 4, left_pixels, 96);
                     
 
                     // right square
                     uint8_t right_pixels[16*16*4] = {0};
-                    set_right_square(right_pixels, side, side_texture, from, to);
+                    set_right_square(right_pixels, side, side_texture, overlay_texture, from, to, tint);
                     stbi_write_jpg("test.jpg", 16, 16, 4, right_pixels, 96);
 
                     combine_images(pixels, top_pixels, left_pixels, right_pixels, 16);
@@ -1785,7 +2010,7 @@ RenderedBlock* get_rendered_block(char* block_minecraft_name, Map* rendered_bloc
         cJSON_free(json);
 
 
-
+        m_put(rendered_blocks, block_name_with_biome, block, sizeof(RenderedBlock));
 
 
     }
@@ -1870,7 +2095,7 @@ int compare_coords(const void *a, const void *b) {
     }
 }
 
-void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks) {
+void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks, Map* biome_name_to_biome_data) {
 
     if (mkdir("dump", 0755) == 0) {
         printf("Directory created: %s\n", "dump");
@@ -1922,6 +2147,7 @@ void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks)
             if (!chunk_tag) { fprintf(stderr, "NBT parse failed\n"); return; }
 
 
+            // get sections
             nbt_tag_t *sections = nbt_tag_compound_get(chunk_tag, "sections");
             if (!sections) {
                 fprintf(stderr, "No sections found!\n");
@@ -1945,6 +2171,9 @@ void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks)
                 char* shape; // stair modifiers
                 char* type; // slab top or bottom
                 char* rotation; // 0-3 rotation for other blocks
+
+                // biome
+                char *biome;
             } Block;
             Map* x_z_to_top_blocks = new_map();
             for (size_t i = 0; i < sections->tag_list.size; ++i) {
@@ -1952,6 +2181,7 @@ void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks)
 
                 nbt_tag_t *biomes = nbt_tag_compound_get(section, "biomes");
                 nbt_tag_t *biomes_palette = nbt_tag_compound_get(biomes, "palette");
+                nbt_tag_t *biomes_data = nbt_tag_compound_get(biomes, "data");
 
                 nbt_tag_t *bs = nbt_tag_compound_get(section, "block_states");
                 nbt_tag_t *palette = nbt_tag_compound_get(bs, "palette");
@@ -1979,6 +2209,7 @@ void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks)
                                     const char *type = name_tag ? name_tag->tag_string.value : "unknown";
                                     if (strcmp(type,  "minecraft:air") != 0) {
 
+                                        // get block coordinates
                                         int block_x = chunk_x + x;
                                         int block_y = section_y + y;
                                         int block_z = chunk_z + z;
@@ -2037,9 +2268,51 @@ void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks)
 
                                         }
 
+                                        // get block biome
+                                        if (biomes_palette->tag_list.size == 1 || !biomes_data) {
+                                            nbt_tag_t *biome_entry = nbt_tag_list_get(biomes_palette, 0);
+                                            const char *biome_name = biome_entry->tag_string.value;
+                                            block->biome = biome_name;
+                                        }
+                                        else {
+                                            // Convert block coordinates to biome coordinates (divide by 4)
+                                            int biome_x = x / 4;  // 0-3
+                                            int biome_y = y / 4;  // 0-3 (within the section)
+                                            int biome_z = z / 4;  // 0-3
+                                            
+                                            // Calculate the index in the 4x4x4 biome array
+                                            int biome_index = biome_y * 16 + biome_z * 4 + biome_x;
+                                            
+                                            // Calculate bits per entry (minimum 1 bit)
+                                            int bits_per_entry = 0;
+                                            int temp = biomes_palette->tag_list.size - 1;
+                                            while (temp > 0) {
+                                                bits_per_entry++;
+                                                temp >>= 1;
+                                            }
+                                            if (bits_per_entry == 0) bits_per_entry = 1;
+                                            
+                                            // Get the data array (array of longs)
+                                            const int64_t *data_array = biomes_data->tag_long_array.value;
+                                            
+                                            // Extract the palette index from the packed data
+                                            int values_per_long = 64 / bits_per_entry;
+                                            int long_index = biome_index / values_per_long;
+                                            int offset_in_long = biome_index % values_per_long;
+                                            
+                                            int64_t data_long = data_array[long_index];
+                                            int shift = offset_in_long * bits_per_entry;
+                                            int palette_index = (data_long >> shift) & ((1 << bits_per_entry) - 1);
+                                            
+                                            // Get the biome name from the palette
+                                            nbt_tag_t *biome_entry = nbt_tag_list_get(biomes_palette, palette_index);
+                                            const char *biome_name = biome_entry->tag_string.value;
+                                            block->biome = biome_name;
+                                            
+                                        }
 
                                         // store in map
-                                        insert(x_z_to_top_blocks, tag, block, sizeof(Block*));
+                                        m_put(x_z_to_top_blocks, tag, block, sizeof(Block*));
                                     }
                                     // printf("x: %d, y: %d, z: %d;  %s    ", x, y, z, name);
                                 }
@@ -2073,10 +2346,10 @@ void render_mca(const char *region_file_path, Map* block_tag_to_rendered_blocks)
                 Coord bl_c = coordinates[i];
                 char tag[256];
                 sprintf(tag, "%d %d", bl_c.x, bl_c.z);
-                Block* block = at(x_z_to_top_blocks, tag);
+                Block* block = m_get(x_z_to_top_blocks, tag);
 
                 // get rendered block
-                RenderedBlock* render = get_rendered_block(block->block_type, block_tag_to_rendered_blocks);
+                RenderedBlock* render = get_rendered_block(block->block_type, block->biome, block_tag_to_rendered_blocks, biome_name_to_biome_data);
                 
                 printf("yay\n");
 
@@ -2167,6 +2440,11 @@ int main(int argc, char **argv) {
     // get_rendered_block("minecraft:block/birch_stairs", block_tag_to_rendered_blocks);
 
 
+    // LOAD BIOME GRASS/WATER tints
+    Map* biome_name_to_biome_data = load_biomes();
+
+
+
     /*
         RENDER MCAS
     */
@@ -2174,7 +2452,7 @@ int main(int argc, char **argv) {
         printf("  %s\n", files[i]);
 
         // print_region_to_file(files[i], "region.txt");
-        render_mca(files[i], block_tag_to_rendered_blocks);
+        render_mca(files[i], block_tag_to_rendered_blocks, biome_name_to_biome_data);
 
         free(files[i]);
     }

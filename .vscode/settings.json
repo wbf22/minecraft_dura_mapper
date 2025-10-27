@@ -24,6 +24,8 @@
         "deque": "c",
         "limits": "c",
         "optional": "c",
-        "ratio": "c"
+        "ratio": "c",
+        "string_view": "c",
+        "array": "c"
     }
 }
